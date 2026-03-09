@@ -11,6 +11,7 @@ import path from "node:path";
 
 import { createAgentLaunchSpec } from "./adapters";
 import { getCodingAssistantSkillConfig } from "./config";
+import { saveResumeSessionId } from "./sessions";
 import type {
   CliOptions,
   RepoSnapshot,
@@ -131,7 +132,7 @@ export async function executeRun(
     "Run started.",
   );
 
-  const spec = createAgentLaunchSpec(options, context);
+  const spec = await createAgentLaunchSpec(options, context);
   const logStream = createWriteStream(context.logPath, { flags: "a" });
 
   try {
@@ -175,6 +176,20 @@ export async function executeRun(
     });
 
     const status: RunStatus = exitCode === 0 ? "success" : "failed";
+    const sessionId = extractSessionId(
+      options.agent,
+      `${capturedStdout}\n${capturedStderr}`,
+    );
+    if (sessionId) {
+      await saveResumeSessionId(
+        options.outputRoot,
+        options.agent,
+        options.cwd,
+        sessionId,
+      );
+      logStream.write(`[wrapper] sessionId=${sessionId}\n`);
+    }
+
     const summary = await buildSummary(
       context,
       capturedStdout,
@@ -189,6 +204,8 @@ export async function executeRun(
       exitCode,
       new Date().toISOString(),
       summary,
+      sessionId,
+      spec.resumedSessionId ?? null,
     );
     await notifyCompletion(
       options,
@@ -210,6 +227,8 @@ export async function writeResultFile(
   exitCode: number | null,
   finishedAt: string | null,
   summary: string,
+  sessionId: string | null = null,
+  resumedFromSessionId: string | null = null,
 ): Promise<void> {
   const agentSummary = await readOptionalText(context.summaryPath);
   const modifiedFiles = await collectModifiedFiles(context.repoSnapshot);
@@ -223,6 +242,7 @@ export async function writeResultFile(
     startedAt: context.startedAt,
     finishedAt,
     durationSeconds: calculateDurationSeconds(context.startedAt, finishedAt),
+    durationMinutes: calculateDurationMinutes(context.startedAt, finishedAt),
     exitCode,
     status,
     logPath: context.logPath,
@@ -230,6 +250,8 @@ export async function writeResultFile(
     summaryPath: context.summaryPath,
     summary,
     agentSummary: trimSummary(agentSummary ?? summary),
+    sessionId,
+    resumedFromSessionId,
     modifiedFiles,
   };
 
@@ -258,11 +280,14 @@ async function buildNotificationText(
     `- 状态: ${status} (exit ${exitCode})`,
     `- 开始: ${context.startedAt}`,
     `- 完成: ${result?.finishedAt ?? "unknown"}`,
+    `- 总时长(分钟): ${result?.durationMinutes ?? "unknown"}`,
     `- 耗时(秒): ${result?.durationSeconds ?? "unknown"}`,
     `- 目录: ${options.cwd}`,
     `- Run ID: ${context.runId}`,
     `- 任务摘要: ${context.taskSummary}`,
     `- Agent 摘要: ${agentSummary || "(none)"}`,
+    `- Session ID: ${result?.sessionId ?? "unknown"}`,
+    `- Resume 来源: ${result?.resumedFromSessionId ?? "(new session)"}`,
     `- 修改文件: ${modifiedPreview}`,
     `- 结果文件: ${context.resultPath}`,
     `- 日志文件: ${context.logPath}`,
@@ -672,6 +697,43 @@ function calculateDurationSeconds(
   }
 
   return Math.round((endMs - startMs) / 1000);
+}
+
+function calculateDurationMinutes(
+  startedAt: string,
+  finishedAt: string | null,
+): number | null {
+  const seconds = calculateDurationSeconds(startedAt, finishedAt);
+  if (seconds === null) {
+    return null;
+  }
+  return Number((seconds / 60).toFixed(1));
+}
+
+function extractSessionId(agent: CliOptions["agent"], output: string): string | null {
+  if (!output.trim()) {
+    return null;
+  }
+
+  if (agent === "codex") {
+    const match = output.match(/session id:\s*([0-9a-f-]{36})/i);
+    return match?.[1] ?? null;
+  }
+
+  if (agent === "claude") {
+    for (const line of output.split(/\r?\n/).reverse()) {
+      try {
+        const parsed = JSON.parse(line) as { session_id?: unknown };
+        if (typeof parsed.session_id === "string" && parsed.session_id.trim()) {
+          return parsed.session_id;
+        }
+      } catch {
+        // ignore non-JSON lines
+      }
+    }
+  }
+
+  return null;
 }
 
 function formatModifiedFiles(files: string[]): string {

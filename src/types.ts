@@ -18,6 +18,7 @@ export interface CliOptions {
   internalRun: boolean;
   runId?: string;
   startedAt?: string;
+  resumeMode: "auto" | "never";
   notifySessionKey?: string;
   notifyChannel?: string;
   notifyTarget?: string;
@@ -33,6 +34,7 @@ export interface AgentLaunchSpec {
   args: string[];
   env: NodeJS.ProcessEnv;
   summaryFilePath?: string;
+  resumedSessionId?: string | null;
 }
 
 /** Stores resolved paths and timestamps for one wrapper execution. */
@@ -64,6 +66,7 @@ export interface RunResult {
   startedAt: string;
   finishedAt: string | null;
   durationSeconds: number | null;
+  durationMinutes: number | null;
   exitCode: number | null;
   status: RunStatus;
   logPath: string;
@@ -71,5 +74,7 @@ export interface RunResult {
   summaryPath: string;
   summary: string;
   agentSummary: string;
+  sessionId: string | null;
+  resumedFromSessionId: string | null;
   modifiedFiles: string[];
 }
