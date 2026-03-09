@@ -34,6 +34,7 @@ export interface AgentLaunchSpec {
   args: string[];
   env: NodeJS.ProcessEnv;
   summaryFilePath?: string;
+  reportFilePath?: string;
   resumedSessionId?: string | null;
 }
 
@@ -51,12 +52,22 @@ export interface RunContext {
   logPath: string;
   resultPath: string;
   summaryPath: string;
+  reportPath: string;
   startedAt: string;
   taskSummary: string;
   repoSnapshot: RepoSnapshot | null;
 }
 
 /** Defines the JSON artifact written for each run. */
+export interface AgentReport {
+  taskSummary?: string | null;
+  modifiedFiles?: string[] | null;
+  validation?: string[] | null;
+  validationSummary?: string | null;
+  notes?: string | null;
+  commitId?: string | null;
+}
+
 export interface RunResult {
   runId: string;
   agent: SupportedAgent;
@@ -71,8 +82,13 @@ export interface RunResult {
   logPath: string;
   resultPath: string;
   summaryPath: string;
+  reportPath: string;
   summary: string;
   agentSummary: string;
+  validation: string[];
+  validationSummary: string | null;
+  notes: string | null;
+  commitId: string | null;
   sessionId: string | null;
   resumedFromSessionId: string | null;
   modifiedFiles: string[];

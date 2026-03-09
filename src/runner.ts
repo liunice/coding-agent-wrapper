@@ -13,6 +13,7 @@ import { createAgentLaunchSpec } from "./adapters";
 import { getCodingAssistantSkillConfig } from "./config";
 import { saveResumeSessionId } from "./sessions";
 import type {
+  AgentReport,
   CliOptions,
   RepoSnapshot,
   RunContext,
@@ -34,6 +35,7 @@ export async function createRunContext(
   const logPath = path.join(runDir, "run.log");
   const resultPath = path.join(runDir, "result.json");
   const summaryPath = path.join(runDir, "agent-summary.txt");
+  const reportPath = path.join(runDir, "agent-report.json");
 
   await mkdir(runDir, { recursive: true });
 
@@ -43,6 +45,7 @@ export async function createRunContext(
     logPath,
     resultPath,
     summaryPath,
+    reportPath,
     startedAt,
     taskSummary: summarizeTask(options.task),
     repoSnapshot: await captureRepoSnapshot(options.cwd),
@@ -231,7 +234,11 @@ export async function writeResultFile(
   resumedFromSessionId: string | null = null,
 ): Promise<void> {
   const agentSummary = await readOptionalText(context.summaryPath);
-  const modifiedFiles = await collectModifiedFiles(context.repoSnapshot);
+  const report = await readAgentReport(context.reportPath);
+  const modifiedFiles =
+    normalizeStringList(report?.modifiedFiles) ??
+    (await collectModifiedFiles(context.repoSnapshot));
+  const validation = normalizeStringList(report?.validation) ?? [];
 
   const payload: RunResult = {
     runId: context.runId,
@@ -247,8 +254,13 @@ export async function writeResultFile(
     logPath: context.logPath,
     resultPath: context.resultPath,
     summaryPath: context.summaryPath,
+    reportPath: context.reportPath,
     summary,
-    agentSummary: trimSummary(agentSummary ?? summary),
+    agentSummary: trimSummary(report?.taskSummary ?? agentSummary ?? summary),
+    validation,
+    validationSummary: normalizeOptionalString(report?.validationSummary),
+    notes: normalizeOptionalString(report?.notes),
+    commitId: normalizeOptionalString(report?.commitId),
     sessionId,
     resumedFromSessionId,
     modifiedFiles,
@@ -272,21 +284,32 @@ async function buildNotificationText(
   const result = await readRunResult(context.resultPath);
   const modifiedPreview = formatModifiedFiles(result?.modifiedFiles ?? []);
   const agentSummary = result?.agentSummary ?? "";
+  const validationSummary =
+    result?.validationSummary ?? formatValidationSummary(result?.validation ?? []);
 
   return [
     `后台任务已完成：${name}`,
     `- Agent: ${options.agent}`,
     `- 状态: ${status} (exit ${exitCode})`,
+    `- Run ID: ${context.runId}`,
+    `- 目录: ${options.cwd}`,
+    "",
     `- 开始: ${context.startedAt}`,
     `- 完成: ${result?.finishedAt ?? "unknown"}`,
     `- 耗时(分钟): ${result?.durationMinutes ?? "unknown"}`,
-    `- 目录: ${options.cwd}`,
-    `- Run ID: ${context.runId}`,
+    "",
     `- 任务目标: ${context.taskSummary}`,
     `- 任务总结: ${agentSummary || "(none)"}`,
+    "",
+    `- 验证: ${validationSummary || "(未提供)"}`,
+    "",
     `- Session ID: ${result?.sessionId ?? "unknown"}`,
     `- Resume 来源: ${result?.resumedFromSessionId ?? "(new session)"}`,
+    `- Commit ID: ${result?.commitId ?? "(none)"}`,
+    "",
     `- 修改文件: ${modifiedPreview}`,
+    `- 备注: ${result?.notes ?? "(none)"}`,
+    "",
     `- 结果文件: ${context.resultPath}`,
     `- 日志文件: ${context.logPath}`,
   ].join("\n");
@@ -614,6 +637,19 @@ async function readRunResult(filePath: string): Promise<RunResult | null> {
   }
 }
 
+async function readAgentReport(filePath: string): Promise<AgentReport | null> {
+  const content = await readOptionalText(filePath);
+  if (!content) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(content) as AgentReport;
+  } catch {
+    return null;
+  }
+}
+
 async function captureRepoSnapshot(cwd: string): Promise<RepoSnapshot | null> {
   const rootDir = await runGit(["rev-parse", "--show-toplevel"], cwd);
   if (!rootDir) {
@@ -732,6 +768,33 @@ function extractSessionId(agent: CliOptions["agent"], output: string): string | 
   }
 
   return null;
+}
+
+function formatValidationSummary(validation: string[]): string | null {
+  if (validation.length === 0) {
+    return null;
+  }
+  return validation.slice(0, 3).join(", ");
+}
+
+function normalizeStringList(value: string[] | null | undefined): string[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  return value
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function normalizeOptionalString(value: string | null | undefined): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed || null;
 }
 
 function formatModifiedFiles(files: string[]): string {

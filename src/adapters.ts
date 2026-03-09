@@ -15,8 +15,6 @@ const DEFAULT_CLAUDE_FLAGS = [
   "-p",
   "--output-format",
   "json",
-  "--permission-mode",
-  "bypassPermissions",
   "--dangerously-skip-permissions",
 ];
 
@@ -35,6 +33,10 @@ export async function createAgentLaunchSpec(
   }
 }
 
+function buildWrappedTaskPrompt(options: CliOptions, context: RunContext): string {
+  return `${options.task}\n\n---\nCompletion contract (required):\n1. Write a concise natural-language summary of completed work to: ${context.summaryPath}\n2. Write a JSON object to: ${context.reportPath}\n3. JSON schema:\n{\n  \"taskSummary\": string,\n  \"modifiedFiles\": string[],\n  \"validation\": string[],\n  \"validationSummary\": string | null,\n  \"notes\": string | null,\n  \"commitId\": string | null\n}\n4. If this repository is managed by git and the coding task is successfully implemented + checked, you should create a git commit and put the new commit id into commitId.\n5. If the repo is not using git, or you intentionally did not commit, set commitId to null.\n6. Keep modifiedFiles limited to files actually changed by this task.\n7. validationSummary should be a short single-line summary such as: \"build ✅, typecheck ✅\" when applicable.`;
+}
+
 /** Builds the non-interactive Codex command for one task execution. */
 async function buildCodexLaunchSpec(
   options: CliOptions,
@@ -45,12 +47,13 @@ async function buildCodexLaunchSpec(
     options.resumeMode === "auto"
       ? await getResumeSessionId(options.outputRoot, options.agent, options.cwd)
       : null;
+  const wrappedPrompt = buildWrappedTaskPrompt(options, context);
   const args = resumeSessionId
     ? [
         "exec",
         "resume",
         resumeSessionId,
-        options.task,
+        wrappedPrompt,
         "-o",
         context.summaryPath,
         ...DEFAULT_CODEX_FLAGS,
@@ -65,7 +68,7 @@ async function buildCodexLaunchSpec(
         context.summaryPath,
         ...DEFAULT_CODEX_FLAGS,
         ...options.passthroughArgs,
-        options.task,
+        wrappedPrompt,
       ];
 
   const skillEnv = getCodingAssistantSkillConfig().env ?? {};
@@ -85,6 +88,7 @@ async function buildCodexLaunchSpec(
     args,
     env,
     summaryFilePath: context.summaryPath,
+    reportFilePath: context.reportPath,
     resumedSessionId: resumeSessionId,
   };
 }
@@ -92,7 +96,7 @@ async function buildCodexLaunchSpec(
 /** Builds the initial Claude Code command shape for one task execution. */
 async function buildClaudeLaunchSpec(
   options: CliOptions,
-  _context: RunContext,
+  context: RunContext,
 ): Promise<AgentLaunchSpec> {
   const command = process.env.CODING_AGENT_WRAPPER_CLAUDE_BIN ?? "claude";
   const resumeSessionId =
@@ -105,12 +109,12 @@ async function buildClaudeLaunchSpec(
         "-r",
         resumeSessionId,
         ...options.passthroughArgs,
-        options.task,
+        buildWrappedTaskPrompt(options, context),
       ]
     : [
         ...DEFAULT_CLAUDE_FLAGS,
         ...options.passthroughArgs,
-        options.task,
+        buildWrappedTaskPrompt(options, context),
       ];
 
   return {
@@ -119,6 +123,7 @@ async function buildClaudeLaunchSpec(
     env: {
       ...process.env,
     },
+    reportFilePath: context.reportPath,
     resumedSessionId: resumeSessionId,
   };
 }

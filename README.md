@@ -44,9 +44,18 @@
 - 完成通知与 `result.json` 会尽量包含：
   - 开始时间 / 完成时间 / 耗时(分钟)
   - 任务总结
-  - session id / resume 来源
+  - 验证摘要
+  - session id / resume 来源 / commit id
   - 修改文件清单
+  - 备注
   - 状态码
+- wrapper 现在会要求 agent 额外写出 `agent-report.json`，优先从结构化字段读取：
+  - `taskSummary`
+  - `modifiedFiles`
+  - `validation`
+  - `validationSummary`
+  - `notes`
+  - `commitId`
 - 默认会按 `agent + cwd` 记录并复用最近一次 session id；只有显式传 `--new-session` 时才禁用 resume
 
 ## 安装
