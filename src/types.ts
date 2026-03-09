@@ -18,6 +18,11 @@ export interface CliOptions {
   internalRun: boolean;
   runId?: string;
   startedAt?: string;
+  notifyChannel?: string;
+  notifyTarget?: string;
+  notifyAccount?: string;
+  notifyReplyTo?: string;
+  notifyThreadId?: string;
   passthroughArgs: string[];
 }
 

@@ -4,7 +4,7 @@
  */
 
 import { spawn } from "node:child_process";
-import { createWriteStream } from "node:fs";
+import { accessSync, constants, createWriteStream } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -74,6 +74,22 @@ export async function launchDetached(
 
   if (options.label) {
     args.push("--label", options.label);
+  }
+
+  if (options.notifyChannel) {
+    args.push("--notify-channel", options.notifyChannel);
+  }
+  if (options.notifyTarget) {
+    args.push("--notify-target", options.notifyTarget);
+  }
+  if (options.notifyAccount) {
+    args.push("--notify-account", options.notifyAccount);
+  }
+  if (options.notifyReplyTo) {
+    args.push("--notify-reply-to", options.notifyReplyTo);
+  }
+  if (options.notifyThreadId) {
+    args.push("--notify-thread-id", options.notifyThreadId);
   }
 
   if (options.passthroughArgs.length > 0) {
@@ -163,7 +179,9 @@ export async function executeRun(
       summary,
     );
     await notifyCompletion(
+      options,
       buildNotificationText(options, context, status, exitCode),
+      logStream,
     );
 
     return exitCode;
@@ -202,7 +220,7 @@ export async function writeResultFile(
   );
 }
 
-/** Produces a compact notification line for openclaw system events. */
+/** Produces a compact notification line for downstream delivery. */
 function buildNotificationText(
   options: CliOptions,
   context: RunContext,
@@ -210,21 +228,119 @@ function buildNotificationText(
   exitCode: number,
 ): string {
   const name = options.label ?? context.runId;
-  return `Done: ${name} [${options.agent}] ${status} (exit ${exitCode})`;
+  return [
+    `后台任务已完成：${name}`,
+    `- Agent: ${options.agent}`,
+    `- 状态: ${status} (exit ${exitCode})`,
+    `- 目录: ${options.cwd}`,
+    `- Run ID: ${context.runId}`,
+    `- 摘要: ${context.taskSummary}`,
+    `- 结果文件: ${context.resultPath}`,
+    `- 日志文件: ${context.logPath}`,
+  ].join("\n");
 }
 
 /** Sends the completion notification without failing the main run on errors. */
-async function notifyCompletion(text: string): Promise<void> {
-  await new Promise<void>((resolve) => {
-    const child = spawn(
-      "openclaw",
-      ["system", "event", "--text", text, "--mode", "now"],
-      { stdio: "ignore", env: process.env },
-    );
+async function notifyCompletion(
+  options: CliOptions,
+  text: string,
+  logStream: ReturnType<typeof createWriteStream>,
+): Promise<void> {
+  const openclawPath = resolveOpenClawBinary();
+  const command = openclawPath ?? "openclaw";
+  const args = buildNotifyArgs(options, text);
 
-    child.on("close", () => resolve());
-    child.on("error", () => resolve());
+  if (!args) {
+    logStream.write("[wrapper] notify skipped=no-target\n");
+    return;
+  }
+
+  logStream.write(
+    `[wrapper] notify command=${renderCommand(command, args)}\n`,
+  );
+
+  await new Promise<void>((resolve) => {
+    const child = spawn(command, args, {
+      stdio: "ignore",
+      env: process.env,
+    });
+
+    child.on("close", (code) => {
+      logStream.write(`[wrapper] notify exit=${code ?? "null"}\n`);
+      resolve();
+    });
+
+    child.on("error", (error) => {
+      logStream.write(`[wrapper] notify error=${error.message}\n`);
+      resolve();
+    });
   });
+}
+
+/** Resolves an absolute openclaw binary path when PATH inheritance is unreliable. */
+function buildNotifyArgs(options: CliOptions, text: string): string[] | null {
+  if (options.notifyTarget) {
+    const args = [
+      "message",
+      "send",
+      "--target",
+      options.notifyTarget,
+      "--message",
+      text,
+    ];
+
+    if (options.notifyChannel) {
+      args.push("--channel", options.notifyChannel);
+    }
+    if (options.notifyAccount) {
+      args.push("--account", options.notifyAccount);
+    }
+    if (options.notifyReplyTo) {
+      args.push("--reply-to", options.notifyReplyTo);
+    }
+    if (options.notifyThreadId) {
+      args.push("--thread-id", options.notifyThreadId);
+    }
+
+    return args;
+  }
+
+  return ["system", "event", "--text", text, "--mode", "now"];
+}
+
+function resolveOpenClawBinary(): string | null {
+  const candidates = [
+    process.env.OPENCLAW_BIN,
+    process.env.npm_config_prefix
+      ? path.join(process.env.npm_config_prefix, "bin", "openclaw")
+      : null,
+    process.env.HOME ? path.join(process.env.HOME, ".npm-global/bin/openclaw") : null,
+    "/volume1/homes/liunice/.npm-global/bin/openclaw",
+    "/usr/local/bin/openclaw",
+    "/usr/bin/openclaw",
+  ].filter((value): value is string => Boolean(value));
+
+  for (const candidate of candidates) {
+    try {
+      accessSync(candidate, constants.X_OK);
+      return candidate;
+    } catch {
+      // keep searching
+    }
+  }
+
+  const pathEntries = (process.env.PATH ?? "").split(path.delimiter).filter(Boolean);
+  for (const entry of pathEntries) {
+    const candidate = path.join(entry, "openclaw");
+    try {
+      accessSync(candidate, constants.X_OK);
+      return candidate;
+    } catch {
+      // keep searching
+    }
+  }
+
+  return null;
 }
 
 /** Reads the best available summary source after the child process exits. */

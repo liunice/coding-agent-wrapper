@@ -67,6 +67,11 @@ function parseCliArgs(argv: string[]): CliOptions | null {
   let internalRun = false;
   let runId: string | undefined;
   let startedAt: string | undefined;
+  let notifyChannel: string | undefined;
+  let notifyTarget: string | undefined;
+  let notifyAccount: string | undefined;
+  let notifyReplyTo: string | undefined;
+  let notifyThreadId: string | undefined;
   const passthroughArgs: string[] = [];
 
   for (let index = 0; index < args.length; index += 1) {
@@ -99,6 +104,21 @@ function parseCliArgs(argv: string[]): CliOptions | null {
       case "--started-at":
         startedAt = readRequiredValue(value, args[++index]);
         break;
+      case "--notify-channel":
+        notifyChannel = readRequiredValue(value, args[++index]);
+        break;
+      case "--notify-target":
+        notifyTarget = readRequiredValue(value, args[++index]);
+        break;
+      case "--notify-account":
+        notifyAccount = readRequiredValue(value, args[++index]);
+        break;
+      case "--notify-reply-to":
+        notifyReplyTo = readRequiredValue(value, args[++index]);
+        break;
+      case "--notify-thread-id":
+        notifyThreadId = readRequiredValue(value, args[++index]);
+        break;
       case "--detach":
         detach = true;
         break;
@@ -114,6 +134,10 @@ function parseCliArgs(argv: string[]): CliOptions | null {
     return null;
   }
 
+  if ((notifyChannel || notifyAccount || notifyReplyTo || notifyThreadId) && !notifyTarget) {
+    throw new Error("--notify-target is required when using notify delivery flags");
+  }
+
   return {
     agent,
     cwd,
@@ -124,6 +148,11 @@ function parseCliArgs(argv: string[]): CliOptions | null {
     internalRun,
     runId,
     startedAt,
+    notifyChannel,
+    notifyTarget,
+    notifyAccount,
+    notifyReplyTo,
+    notifyThreadId,
     passthroughArgs,
   };
 }
@@ -148,7 +177,7 @@ function readRequiredValue(flag: string, value: string | undefined): string {
 /** Prints the short usage guide for the wrapper CLI. */
 function printUsage(): void {
   process.stdout.write(
-    "coding-agent-wrapper\n\nUsage:\n  node dist/cli.js run --agent <codex|claude> --cwd <path> --task <text> [--label <text>] [--detach] [--output-root <path>] [-- ...passthrough]\n",
+    "coding-agent-wrapper\n\nUsage:\n  node dist/cli.js run --agent <codex|claude> --cwd <path> --task <text> [--label <text>] [--detach] [--output-root <path>] [--notify-channel <name> --notify-target <id> [--notify-account <id>] [--notify-reply-to <id>] [--notify-thread-id <id>]] [-- ...passthrough]\n",
   );
 }
 
