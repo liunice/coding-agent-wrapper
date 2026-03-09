@@ -36,6 +36,13 @@ export interface AgentLaunchSpec {
 }
 
 /** Stores resolved paths and timestamps for one wrapper execution. */
+export interface RepoSnapshot {
+  rootDir: string;
+  headCommit: string | null;
+  changedEntries: Record<string, string>;
+}
+
+/** Stores resolved paths and timestamps for one wrapper execution. */
 export interface RunContext {
   runId: string;
   runDir: string;
@@ -44,6 +51,7 @@ export interface RunContext {
   summaryPath: string;
   startedAt: string;
   taskSummary: string;
+  repoSnapshot: RepoSnapshot | null;
 }
 
 /** Defines the JSON artifact written for each run. */
@@ -55,8 +63,13 @@ export interface RunResult {
   taskSummary: string;
   startedAt: string;
   finishedAt: string | null;
+  durationSeconds: number | null;
   exitCode: number | null;
   status: RunStatus;
   logPath: string;
+  resultPath: string;
+  summaryPath: string;
   summary: string;
+  agentSummary: string;
+  modifiedFiles: string[];
 }

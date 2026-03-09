@@ -5,11 +5,18 @@
 
 import { spawn } from "node:child_process";
 import { accessSync, constants, createWriteStream } from "node:fs";
+import { execFile } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { createAgentLaunchSpec } from "./adapters";
-import type { CliOptions, RunContext, RunResult, RunStatus } from "./types";
+import type {
+  CliOptions,
+  RepoSnapshot,
+  RunContext,
+  RunResult,
+  RunStatus,
+} from "./types";
 
 /** Limits how much stdout/stderr is kept in memory for summary extraction. */
 const MAX_CAPTURED_OUTPUT = 256 * 1024;
@@ -36,6 +43,7 @@ export async function createRunContext(
     summaryPath,
     startedAt,
     taskSummary: summarizeTask(options.task),
+    repoSnapshot: await captureRepoSnapshot(options.cwd),
   };
 }
 
@@ -183,7 +191,7 @@ export async function executeRun(
     );
     await notifyCompletion(
       options,
-      buildNotificationText(options, context, status, exitCode),
+      await buildNotificationText(options, context, status, exitCode),
       logStream,
     );
 
@@ -202,6 +210,9 @@ export async function writeResultFile(
   finishedAt: string | null,
   summary: string,
 ): Promise<void> {
+  const agentSummary = await readOptionalText(context.summaryPath);
+  const modifiedFiles = await collectModifiedFiles(context.repoSnapshot);
+
   const payload: RunResult = {
     runId: context.runId,
     agent: options.agent,
@@ -210,10 +221,15 @@ export async function writeResultFile(
     taskSummary: context.taskSummary,
     startedAt: context.startedAt,
     finishedAt,
+    durationSeconds: calculateDurationSeconds(context.startedAt, finishedAt),
     exitCode,
     status,
     logPath: context.logPath,
+    resultPath: context.resultPath,
+    summaryPath: context.summaryPath,
     summary,
+    agentSummary: trimSummary(agentSummary ?? summary),
+    modifiedFiles,
   };
 
   await writeFile(
@@ -224,20 +240,29 @@ export async function writeResultFile(
 }
 
 /** Produces a compact notification line for downstream delivery. */
-function buildNotificationText(
+async function buildNotificationText(
   options: CliOptions,
   context: RunContext,
   status: RunStatus,
   exitCode: number,
-): string {
+): Promise<string> {
   const name = options.label ?? context.runId;
+  const result = await readRunResult(context.resultPath);
+  const modifiedPreview = formatModifiedFiles(result?.modifiedFiles ?? []);
+  const agentSummary = result?.agentSummary ?? "";
+
   return [
     `后台任务已完成：${name}`,
     `- Agent: ${options.agent}`,
     `- 状态: ${status} (exit ${exitCode})`,
+    `- 开始: ${context.startedAt}`,
+    `- 完成: ${result?.finishedAt ?? "unknown"}`,
+    `- 耗时(秒): ${result?.durationSeconds ?? "unknown"}`,
     `- 目录: ${options.cwd}`,
     `- Run ID: ${context.runId}`,
-    `- 摘要: ${context.taskSummary}`,
+    `- 任务摘要: ${context.taskSummary}`,
+    `- Agent 摘要: ${agentSummary || "(none)"}`,
+    `- 修改文件: ${modifiedPreview}`,
     `- 结果文件: ${context.resultPath}`,
     `- 日志文件: ${context.logPath}`,
   ].join("\n");
@@ -543,6 +568,122 @@ async function readOptionalText(filePath: string): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+async function readRunResult(filePath: string): Promise<RunResult | null> {
+  const content = await readOptionalText(filePath);
+  if (!content) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(content) as RunResult;
+  } catch {
+    return null;
+  }
+}
+
+async function captureRepoSnapshot(cwd: string): Promise<RepoSnapshot | null> {
+  const rootDir = await runGit(["rev-parse", "--show-toplevel"], cwd);
+  if (!rootDir) {
+    return null;
+  }
+
+  const headCommit = await runGit(["rev-parse", "HEAD"], cwd);
+  const changedRaw = await runGit(["status", "--porcelain"], cwd);
+  const changedEntries = parseGitStatus(changedRaw ?? "");
+
+  return {
+    rootDir,
+    headCommit,
+    changedEntries,
+  };
+}
+
+async function collectModifiedFiles(
+  snapshot: RepoSnapshot | null,
+): Promise<string[]> {
+  if (!snapshot) {
+    return [];
+  }
+
+  const changedRaw = await runGit(["status", "--porcelain"], snapshot.rootDir);
+  const currentEntries = parseGitStatus(changedRaw ?? "");
+  const paths = new Set<string>();
+
+  for (const path of Object.keys(snapshot.changedEntries)) {
+    if (!(path in currentEntries)) {
+      continue;
+    }
+
+    if (currentEntries[path] !== snapshot.changedEntries[path]) {
+      paths.add(path);
+    }
+  }
+
+  for (const [path, status] of Object.entries(currentEntries)) {
+    if (!(path in snapshot.changedEntries) && status.trim()) {
+      paths.add(path);
+    }
+  }
+
+  return Array.from(paths).sort();
+}
+
+function parseGitStatus(output: string): Record<string, string> {
+  const entries: Record<string, string> = {};
+
+  for (const line of output.split(/\r?\n/)) {
+    if (!line.trim()) {
+      continue;
+    }
+
+    const status = line.slice(0, 2);
+    const rawPath = line.slice(3).trim();
+    const path = rawPath.includes(" -> ")
+      ? rawPath.split(" -> ").at(-1) ?? rawPath
+      : rawPath;
+    entries[path] = status;
+  }
+
+  return entries;
+}
+
+function calculateDurationSeconds(
+  startedAt: string,
+  finishedAt: string | null,
+): number | null {
+  if (!finishedAt) {
+    return null;
+  }
+
+  const startMs = Date.parse(startedAt);
+  const endMs = Date.parse(finishedAt);
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) {
+    return null;
+  }
+
+  return Math.round((endMs - startMs) / 1000);
+}
+
+function formatModifiedFiles(files: string[]): string {
+  if (files.length === 0) {
+    return "(none detected)";
+  }
+  const preview = files.slice(0, 8).join(", ");
+  return files.length > 8 ? `${preview}, ... (+${files.length - 8} more)` : preview;
+}
+
+async function runGit(args: string[], cwd: string): Promise<string | null> {
+  return await new Promise<string | null>((resolve) => {
+    execFile("git", args, { cwd }, (error, stdout) => {
+      if (error) {
+        resolve(null);
+        return;
+      }
+      resolve(stdout.trim() || null);
+    });
+  });
 }
 
 /** Shrinks long summaries while keeping the latest useful lines. */

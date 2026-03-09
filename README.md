@@ -36,8 +36,15 @@
 - 自动写入：
   - `run.log`
   - `result.json`
-- 任务结束后自动调用：
-  - `openclaw system event --text "Done: ..." --mode now`
+  - `agent-summary.txt`（若底层 agent 显式输出/写入）
+- 任务结束后自动通知：
+  - 外部聊天渠道优先走 `openclaw message send`
+  - session / webchat 场景回退到 `chat.inject`
+- 完成通知与 `result.json` 会尽量包含：
+  - 开始时间 / 完成时间 / 耗时
+  - agent 摘要
+  - 修改文件清单
+  - 状态码
 
 ## 安装
 
