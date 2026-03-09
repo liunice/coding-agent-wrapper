@@ -251,54 +251,31 @@ async function notifyCompletion(
 ): Promise<void> {
   const openclawPath = resolveOpenClawBinary();
   const command = openclawPath ?? "openclaw";
-  const args = buildNotifyArgs(options, text);
+  const attempts = buildNotifyAttempts(options, text);
 
-  if (!args) {
+  if (attempts.length === 0) {
     logStream.write("[wrapper] notify skipped=no-target\n");
     return;
   }
 
-  logStream.write(
-    `[wrapper] notify command=${renderCommand(command, args)}\n`,
-  );
+  for (const attempt of attempts) {
+    logStream.write(
+      `[wrapper] notify attempt=${attempt.name} command=${renderCommand(command, attempt.args)}\n`,
+    );
 
-  await new Promise<void>((resolve) => {
-    const child = spawn(command, args, {
-      stdio: "ignore",
-      env: process.env,
-    });
-
-    child.on("close", (code) => {
-      logStream.write(`[wrapper] notify exit=${code ?? "null"}\n`);
-      resolve();
-    });
-
-    child.on("error", (error) => {
-      logStream.write(`[wrapper] notify error=${error.message}\n`);
-      resolve();
-    });
-  });
+    const result = await runNotifyAttempt(command, attempt.args, logStream);
+    if (result === 0) {
+      return;
+    }
+  }
 }
 
 /** Resolves an absolute openclaw binary path when PATH inheritance is unreliable. */
-function buildNotifyArgs(options: CliOptions, text: string): string[] | null {
-  if (options.notifySessionKey) {
-    const params = {
-      sessionKey: options.notifySessionKey,
-      message: text,
-      label: "coding-agent-wrapper",
-    };
-
-    return [
-      "gateway",
-      "call",
-      "chat.inject",
-      "--params",
-      JSON.stringify(params),
-      "--timeout",
-      "10000",
-    ];
-  }
+function buildNotifyAttempts(
+  options: CliOptions,
+  text: string,
+): Array<{ name: string; args: string[] }> {
+  const attempts: Array<{ name: string; args: string[] }> = [];
 
   if (options.notifyTarget) {
     const args = [
@@ -323,10 +300,61 @@ function buildNotifyArgs(options: CliOptions, text: string): string[] | null {
       args.push("--thread-id", options.notifyThreadId);
     }
 
-    return args;
+    attempts.push({ name: "message-send", args });
   }
 
-  return ["system", "event", "--text", text, "--mode", "now"];
+  if (options.notifySessionKey) {
+    const params = {
+      sessionKey: options.notifySessionKey,
+      message: text,
+      label: "coding-agent-wrapper",
+    };
+
+    attempts.push({
+      name: "chat-inject",
+      args: [
+        "gateway",
+        "call",
+        "chat.inject",
+        "--params",
+        JSON.stringify(params),
+        "--timeout",
+        "10000",
+      ],
+    });
+  }
+
+  if (attempts.length === 0) {
+    attempts.push({
+      name: "system-event",
+      args: ["system", "event", "--text", text, "--mode", "now"],
+    });
+  }
+
+  return attempts;
+}
+
+async function runNotifyAttempt(
+  command: string,
+  args: string[],
+  logStream: ReturnType<typeof createWriteStream>,
+): Promise<number | null> {
+  return await new Promise<number | null>((resolve) => {
+    const child = spawn(command, args, {
+      stdio: "ignore",
+      env: process.env,
+    });
+
+    child.on("close", (code) => {
+      logStream.write(`[wrapper] notify exit=${code ?? "null"}\n`);
+      resolve(code ?? null);
+    });
+
+    child.on("error", (error) => {
+      logStream.write(`[wrapper] notify error=${error.message}\n`);
+      resolve(null);
+    });
+  });
 }
 
 function resolveOpenClawBinary(): string | null {
