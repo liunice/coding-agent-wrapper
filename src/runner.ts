@@ -10,6 +10,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { createAgentLaunchSpec } from "./adapters";
+import { getCodingAssistantSkillConfig } from "./config";
 import type {
   CliOptions,
   RepoSnapshot,
@@ -301,40 +302,47 @@ function buildNotifyAttempts(
   text: string,
 ): Array<{ name: string; args: string[] }> {
   const attempts: Array<{ name: string; args: string[] }> = [];
+  const skillNotify = getCodingAssistantSkillConfig().notify ?? {};
+  const notifyChannel = options.notifyChannel ?? skillNotify.channel;
+  const notifyTarget = options.notifyTarget ?? skillNotify.target;
+  const notifyAccount = options.notifyAccount ?? skillNotify.accountId;
+  const notifyReplyTo = options.notifyReplyTo ?? skillNotify.replyTo;
+  const notifyThreadId = options.notifyThreadId ?? skillNotify.threadId;
+  const notifySessionKey = options.notifySessionKey ?? skillNotify.sessionKey;
 
-  if (options.notifyTarget) {
+  if (notifyTarget) {
     const args = [
       "message",
       "send",
       "--target",
-      options.notifyTarget,
+      notifyTarget,
       "--message",
       text,
     ];
 
-    if (options.notifyChannel) {
-      args.push("--channel", options.notifyChannel);
+    if (notifyChannel) {
+      args.push("--channel", notifyChannel);
     }
-    if (options.notifyAccount) {
-      args.push("--account", options.notifyAccount);
+    if (notifyAccount) {
+      args.push("--account", notifyAccount);
     }
-    if (options.notifyReplyTo) {
-      args.push("--reply-to", options.notifyReplyTo);
+    if (notifyReplyTo) {
+      args.push("--reply-to", notifyReplyTo);
     }
-    if (options.notifyThreadId) {
-      args.push("--thread-id", options.notifyThreadId);
+    if (notifyThreadId) {
+      args.push("--thread-id", notifyThreadId);
     }
 
     attempts.push({ name: "message-send", args });
   }
 
-  if (options.notifySessionKey) {
+  if (notifySessionKey) {
     // TODO(webchat): `chat.inject` already writes the completion note into the target
     // session transcript, but Control UI / webchat does not always surface that
     // injected assistant message in the live chat view. Keep this session fallback
     // for now, but revisit the Control UI rendering / subscription path later.
     const params = {
-      sessionKey: options.notifySessionKey,
+      sessionKey: notifySessionKey,
       message: text,
       label: "coding-agent-wrapper",
     };

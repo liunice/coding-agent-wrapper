@@ -27,7 +27,7 @@
 - 支持统一 CLI 参数：`agent`、`cwd`、`task`、`label`
 - 支持 `--detach` 后台运行
 - 支持 `codex` 适配
-  - 自动注入 `CODEX_API_KEY=cli-proxy-api`
+  - `CODEX_API_KEY` 从运行环境或 `openclaw.json -> skills.entries.coding-assistant.env` 读取
   - 默认附加 `--dangerously-bypass-approvals-and-sandbox`
 - 支持 `claude` 适配骨架
   - 已实现命令拼装

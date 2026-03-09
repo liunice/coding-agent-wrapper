@@ -3,6 +3,7 @@
  * Important note: v1 favors a stable wrapper contract over deep agent-specific features.
  */
 
+import { getCodingAssistantSkillConfig } from "./config";
 import type { AgentLaunchSpec, CliOptions, RunContext } from "./types";
 
 /** Default flags for local Codex runs in externally sandboxed environments. */
@@ -51,13 +52,22 @@ function buildCodexLaunchSpec(
     options.task,
   ];
 
+  const skillEnv = getCodingAssistantSkillConfig().env ?? {};
+  const env = {
+    ...process.env,
+    ...skillEnv,
+  };
+
+  if (!env.CODEX_API_KEY) {
+    throw new Error(
+      "Missing CODEX_API_KEY. Set it in the runtime environment or openclaw.json -> skills.entries.coding-assistant.env.CODEX_API_KEY.",
+    );
+  }
+
   return {
     command,
     args,
-    env: {
-      ...process.env,
-      CODEX_API_KEY: "cli-proxy-api",
-    },
+    env,
     summaryFilePath: context.summaryPath,
   };
 }
