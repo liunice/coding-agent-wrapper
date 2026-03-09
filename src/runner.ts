@@ -297,8 +297,8 @@ async function buildNotificationText(
     `• 目录: ${options.cwd}`,
     "",
     "【时间】",
-    `• 开始: ${context.startedAt}`,
-    `• 完成: ${result?.finishedAt ?? "unknown"}`,
+    `• 开始: ${formatDisplayTime(context.startedAt)}`,
+    `• 完成: ${formatDisplayTime(result?.finishedAt ?? null)}`,
     `• 耗时(分钟): ${result?.durationMinutes ?? "unknown"}`,
     "",
     "【任务】",
@@ -750,6 +750,37 @@ function calculateDurationMinutes(
     return null;
   }
   return Number((seconds / 60).toFixed(1));
+}
+
+function formatDisplayTime(value: string | null): string {
+  if (!value) {
+    return "unknown";
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  const formatter = new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  });
+
+  const parts = Object.fromEntries(
+    formatter
+      .formatToParts(date)
+      .filter((part) => part.type !== "literal")
+      .map((part) => [part.type, part.value]),
+  );
+
+  return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second} GMT+8`;
 }
 
 function extractSessionId(agent: CliOptions["agent"], output: string): string | null {
