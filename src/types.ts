@@ -18,6 +18,7 @@ export interface CliOptions {
   internalRun: boolean;
   runId?: string;
   startedAt?: string;
+  notifySessionKey?: string;
   notifyChannel?: string;
   notifyTarget?: string;
   notifyAccount?: string;

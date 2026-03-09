@@ -67,6 +67,7 @@ function parseCliArgs(argv: string[]): CliOptions | null {
   let internalRun = false;
   let runId: string | undefined;
   let startedAt: string | undefined;
+  let notifySessionKey: string | undefined;
   let notifyChannel: string | undefined;
   let notifyTarget: string | undefined;
   let notifyAccount: string | undefined;
@@ -103,6 +104,9 @@ function parseCliArgs(argv: string[]): CliOptions | null {
         break;
       case "--started-at":
         startedAt = readRequiredValue(value, args[++index]);
+        break;
+      case "--notify-session-key":
+        notifySessionKey = readRequiredValue(value, args[++index]);
         break;
       case "--notify-channel":
         notifyChannel = readRequiredValue(value, args[++index]);
@@ -148,6 +152,7 @@ function parseCliArgs(argv: string[]): CliOptions | null {
     internalRun,
     runId,
     startedAt,
+    notifySessionKey,
     notifyChannel,
     notifyTarget,
     notifyAccount,
@@ -177,7 +182,7 @@ function readRequiredValue(flag: string, value: string | undefined): string {
 /** Prints the short usage guide for the wrapper CLI. */
 function printUsage(): void {
   process.stdout.write(
-    "coding-agent-wrapper\n\nUsage:\n  node dist/cli.js run --agent <codex|claude> --cwd <path> --task <text> [--label <text>] [--detach] [--output-root <path>] [--notify-channel <name> --notify-target <id> [--notify-account <id>] [--notify-reply-to <id>] [--notify-thread-id <id>]] [-- ...passthrough]\n",
+    "coding-agent-wrapper\n\nUsage:\n  node dist/cli.js run --agent <codex|claude> --cwd <path> --task <text> [--label <text>] [--detach] [--output-root <path>] [--notify-session-key <key>] [--notify-channel <name> --notify-target <id> [--notify-account <id>] [--notify-reply-to <id>] [--notify-thread-id <id>]] [-- ...passthrough]\n",
   );
 }
 

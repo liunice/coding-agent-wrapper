@@ -76,6 +76,9 @@ export async function launchDetached(
     args.push("--label", options.label);
   }
 
+  if (options.notifySessionKey) {
+    args.push("--notify-session-key", options.notifySessionKey);
+  }
   if (options.notifyChannel) {
     args.push("--notify-channel", options.notifyChannel);
   }
@@ -279,6 +282,31 @@ async function notifyCompletion(
 
 /** Resolves an absolute openclaw binary path when PATH inheritance is unreliable. */
 function buildNotifyArgs(options: CliOptions, text: string): string[] | null {
+  if (options.notifySessionKey) {
+    const params = {
+      sessionKey: options.notifySessionKey,
+      message: text,
+      deliver: true,
+      bestEffortDeliver: true,
+      idempotencyKey: `notify-${Date.now()}`,
+      ...(options.notifyChannel ? { replyChannel: options.notifyChannel } : {}),
+      ...(options.notifyAccount ? { replyAccountId: options.notifyAccount } : {}),
+      ...(options.notifyReplyTo ? { replyTo: options.notifyReplyTo } : {}),
+      ...(options.notifyThreadId ? { threadId: options.notifyThreadId } : {}),
+    };
+
+    return [
+      "gateway",
+      "call",
+      "agent",
+      "--params",
+      JSON.stringify(params),
+      "--expect-final",
+      "--timeout",
+      "20000",
+    ];
+  }
+
   if (options.notifyTarget) {
     const args = [
       "message",
