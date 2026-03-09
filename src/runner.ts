@@ -304,6 +304,10 @@ function buildNotifyAttempts(
   }
 
   if (options.notifySessionKey) {
+    // TODO(webchat): `chat.inject` already writes the completion note into the target
+    // session transcript, but Control UI / webchat does not always surface that
+    // injected assistant message in the live chat view. Keep this session fallback
+    // for now, but revisit the Control UI rendering / subscription path later.
     const params = {
       sessionKey: options.notifySessionKey,
       message: text,
