@@ -25,7 +25,7 @@ interface OpenClawConfigShape {
   };
 }
 
-let cachedSkillConfig: CodingAssistantSkillConfig | null | undefined;
+let cachedSkillConfig: CodingAssistantSkillConfig | undefined;
 
 export function getCodingAssistantSkillConfig(): CodingAssistantSkillConfig {
   if (cachedSkillConfig !== undefined) {
@@ -39,9 +39,30 @@ export function getCodingAssistantSkillConfig(): CodingAssistantSkillConfig {
     ...process.env,
   };
 
+  const resolvedEnv = resolveStringMap(rawSkillConfig.env, variableSources) ?? {};
+
   cachedSkillConfig = {
-    env: resolveStringMap(rawSkillConfig.env, variableSources),
-    notify: resolveNotifyConfig(rawSkillConfig.notify, variableSources),
+    env: resolvedEnv,
+    notify: {
+      channel:
+        process.env.CODING_ASSISTANT_NOTIFY_CHANNEL ??
+        resolvedEnv.CODING_ASSISTANT_NOTIFY_CHANNEL,
+      target:
+        process.env.CODING_ASSISTANT_NOTIFY_TARGET ??
+        resolvedEnv.CODING_ASSISTANT_NOTIFY_TARGET,
+      accountId:
+        process.env.CODING_ASSISTANT_NOTIFY_ACCOUNT_ID ??
+        resolvedEnv.CODING_ASSISTANT_NOTIFY_ACCOUNT_ID,
+      replyTo:
+        process.env.CODING_ASSISTANT_NOTIFY_REPLY_TO ??
+        resolvedEnv.CODING_ASSISTANT_NOTIFY_REPLY_TO,
+      threadId:
+        process.env.CODING_ASSISTANT_NOTIFY_THREAD_ID ??
+        resolvedEnv.CODING_ASSISTANT_NOTIFY_THREAD_ID,
+      sessionKey:
+        process.env.CODING_ASSISTANT_NOTIFY_SESSION_KEY ??
+        resolvedEnv.CODING_ASSISTANT_NOTIFY_SESSION_KEY,
+    },
   };
 
   return cachedSkillConfig;
@@ -82,28 +103,6 @@ function resolveStringMap(
     result[key] = resolveTemplate(raw, variables);
   }
   return result;
-}
-
-function resolveNotifyConfig(
-  value: CodingAssistantNotifyConfig | undefined,
-  variables: Record<string, string | undefined>,
-): CodingAssistantNotifyConfig | undefined {
-  if (!value) {
-    return undefined;
-  }
-
-  return {
-    channel: value.channel ? resolveTemplate(value.channel, variables) : undefined,
-    target: value.target ? resolveTemplate(value.target, variables) : undefined,
-    accountId: value.accountId
-      ? resolveTemplate(value.accountId, variables)
-      : undefined,
-    replyTo: value.replyTo ? resolveTemplate(value.replyTo, variables) : undefined,
-    threadId: value.threadId ? resolveTemplate(value.threadId, variables) : undefined,
-    sessionKey: value.sessionKey
-      ? resolveTemplate(value.sessionKey, variables)
-      : undefined,
-  };
 }
 
 function resolveTemplate(
