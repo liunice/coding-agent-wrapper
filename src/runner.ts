@@ -286,24 +286,17 @@ function buildNotifyArgs(options: CliOptions, text: string): string[] | null {
     const params = {
       sessionKey: options.notifySessionKey,
       message: text,
-      deliver: true,
-      bestEffortDeliver: true,
-      idempotencyKey: `notify-${Date.now()}`,
-      ...(options.notifyChannel ? { replyChannel: options.notifyChannel } : {}),
-      ...(options.notifyAccount ? { replyAccountId: options.notifyAccount } : {}),
-      ...(options.notifyReplyTo ? { replyTo: options.notifyReplyTo } : {}),
-      ...(options.notifyThreadId ? { threadId: options.notifyThreadId } : {}),
+      label: "coding-agent-wrapper",
     };
 
     return [
       "gateway",
       "call",
-      "agent",
+      "chat.inject",
       "--params",
       JSON.stringify(params),
-      "--expect-final",
       "--timeout",
-      "20000",
+      "10000",
     ];
   }
 
