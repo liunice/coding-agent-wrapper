@@ -235,9 +235,15 @@ export async function writeResultFile(
 ): Promise<void> {
   const agentSummary = await readOptionalText(context.summaryPath);
   const report = await readAgentReport(context.reportPath);
-  const modifiedFiles =
-    normalizeStringList(report?.modifiedFiles) ??
-    (await collectModifiedFiles(context.repoSnapshot));
+  const detectedModifiedFiles = await collectModifiedFiles(context.repoSnapshot);
+  const artifactFiles =
+    normalizeStringList(report?.artifactFiles) ??
+    detectArtifactFiles(normalizeStringList(report?.modifiedFiles) ?? []);
+  const explicitProjectModifiedFiles = normalizeStringList(report?.projectModifiedFiles);
+  const fallbackModifiedFiles = excludeArtifactFiles(detectedModifiedFiles, artifactFiles);
+  const projectModifiedFiles =
+    explicitProjectModifiedFiles ??
+    excludeArtifactFiles(normalizeStringList(report?.modifiedFiles) ?? fallbackModifiedFiles, artifactFiles);
   const validation = normalizeStringList(report?.validation) ?? [];
 
   const payload: RunResult = {
@@ -263,7 +269,9 @@ export async function writeResultFile(
     commitId: normalizeOptionalString(report?.commitId),
     sessionId,
     resumedFromSessionId,
-    modifiedFiles,
+    modifiedFiles: projectModifiedFiles,
+    projectModifiedFiles,
+    artifactFiles,
   };
 
   await writeFile(
@@ -282,7 +290,7 @@ async function buildNotificationText(
 ): Promise<string> {
   const name = options.label ?? context.runId;
   const result = await readRunResult(context.resultPath);
-  const modifiedLines = formatModifiedFileLines(result?.modifiedFiles ?? []);
+  const modifiedLines = formatModifiedFileLines(result?.projectModifiedFiles ?? []);
   const agentSummary = result?.agentSummary ?? "";
   const validationSummary =
     result?.validationSummary ?? formatValidationSummary(result?.validation ?? []);
@@ -836,9 +844,18 @@ function normalizeOptionalString(value: string | null | undefined): string | nul
   return trimmed || null;
 }
 
+function detectArtifactFiles(files: string[]): string[] {
+  return files.filter((file) => /(^|\/)runs\/[^/]+\/(agent-summary\.txt|agent-report\.json|result\.json|run\.log)$/.test(file));
+}
+
+function excludeArtifactFiles(files: string[], artifactFiles: string[]): string[] {
+  const artifactSet = new Set(artifactFiles);
+  return files.filter((file) => !artifactSet.has(file));
+}
+
 function formatModifiedFileLines(files: string[]): string[] {
   if (files.length === 0) {
-    return ["• (本次未检测到工作区文件变更)"];
+    return ["• (本次未修改项目文件)"];
   }
 
   const limit = 20;

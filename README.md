@@ -51,11 +51,14 @@
   - 状态码
 - wrapper 现在会要求 agent 额外写出 `agent-report.json`，优先从结构化字段读取：
   - `taskSummary`
-  - `modifiedFiles`
+  - `modifiedFiles`（兼容字段）
+  - `projectModifiedFiles`
+  - `artifactFiles`
   - `validation`
   - `validationSummary`
   - `notes`
   - `commitId`
+- 用户通知里的 `【修改文件】` 默认只展示项目改动；wrapper 产物（如 `agent-summary.txt` / `agent-report.json`）会单独归类到 `artifactFiles`
 - 默认会按 `agent + cwd` 记录并复用最近一次 session id；只有显式传 `--new-session` 时才禁用 resume
 
 ## 安装

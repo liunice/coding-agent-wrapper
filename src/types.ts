@@ -62,6 +62,8 @@ export interface RunContext {
 export interface AgentReport {
   taskSummary?: string | null;
   modifiedFiles?: string[] | null;
+  projectModifiedFiles?: string[] | null;
+  artifactFiles?: string[] | null;
   validation?: string[] | null;
   validationSummary?: string | null;
   notes?: string | null;
@@ -92,4 +94,6 @@ export interface RunResult {
   sessionId: string | null;
   resumedFromSessionId: string | null;
   modifiedFiles: string[];
+  projectModifiedFiles: string[];
+  artifactFiles: string[];
 }
