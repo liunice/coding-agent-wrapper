@@ -43,7 +43,7 @@
   - 默认通知路由可从 `openclaw.json -> skills.entries.coding-assistant.env` 中的 `NOTIFY_*` 环境变量读取
 - 完成通知与 `result.json` 会尽量包含：
   - 开始时间 / 完成时间 / 耗时(分钟)
-  - 任务总结
+  - `【任务目标】` 与 `【任务总结】` 两个独立区块
   - 验证摘要
   - session id / resume 来源 / commit id
   - 修改文件清单
