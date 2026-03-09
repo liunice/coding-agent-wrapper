@@ -1,0 +1,22 @@
+{
+  "name": "coding-agent-wrapper",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A minimal coding agent wrapper for Codex and Claude Code.",
+  "bin": {
+    "coding-agent-wrapper": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "type-check": "tsc -p tsconfig.json --noEmit",
+    "lint": "biome check ."
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "@types/node": "^24.5.2",
+    "typescript": "^5.9.2"
+  }
+}
