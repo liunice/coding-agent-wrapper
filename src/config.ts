@@ -45,23 +45,23 @@ export function getCodingAssistantSkillConfig(): CodingAssistantSkillConfig {
     env: resolvedEnv,
     notify: {
       channel:
-        process.env.CODING_ASSISTANT_NOTIFY_CHANNEL ??
-        resolvedEnv.CODING_ASSISTANT_NOTIFY_CHANNEL,
+        process.env.NOTIFY_CHANNEL ??
+        resolvedEnv.NOTIFY_CHANNEL,
       target:
-        process.env.CODING_ASSISTANT_NOTIFY_TARGET ??
-        resolvedEnv.CODING_ASSISTANT_NOTIFY_TARGET,
+        process.env.NOTIFY_TARGET ??
+        resolvedEnv.NOTIFY_TARGET,
       accountId:
-        process.env.CODING_ASSISTANT_NOTIFY_ACCOUNT_ID ??
-        resolvedEnv.CODING_ASSISTANT_NOTIFY_ACCOUNT_ID,
+        process.env.NOTIFY_ACCOUNT_ID ??
+        resolvedEnv.NOTIFY_ACCOUNT_ID,
       replyTo:
-        process.env.CODING_ASSISTANT_NOTIFY_REPLY_TO ??
-        resolvedEnv.CODING_ASSISTANT_NOTIFY_REPLY_TO,
+        process.env.NOTIFY_REPLY_TO ??
+        resolvedEnv.NOTIFY_REPLY_TO,
       threadId:
-        process.env.CODING_ASSISTANT_NOTIFY_THREAD_ID ??
-        resolvedEnv.CODING_ASSISTANT_NOTIFY_THREAD_ID,
+        process.env.NOTIFY_THREAD_ID ??
+        resolvedEnv.NOTIFY_THREAD_ID,
       sessionKey:
-        process.env.CODING_ASSISTANT_NOTIFY_SESSION_KEY ??
-        resolvedEnv.CODING_ASSISTANT_NOTIFY_SESSION_KEY,
+        process.env.NOTIFY_SESSION_KEY ??
+        resolvedEnv.NOTIFY_SESSION_KEY,
     },
   };
 

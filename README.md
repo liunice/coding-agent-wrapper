@@ -40,10 +40,10 @@
 - 任务结束后自动通知：
   - 外部聊天渠道优先走 `openclaw message send`
   - session / webchat 场景回退到 `chat.inject`
-  - 默认通知路由可从 `openclaw.json -> skills.entries.coding-assistant.env` 中的 `CODING_ASSISTANT_NOTIFY_*` 环境变量读取
+  - 默认通知路由可从 `openclaw.json -> skills.entries.coding-assistant.env` 中的 `NOTIFY_*` 环境变量读取
 - 完成通知与 `result.json` 会尽量包含：
-  - 开始时间 / 完成时间 / 总时长(分钟) / 耗时
-  - agent 摘要
+  - 开始时间 / 完成时间 / 耗时(分钟)
+  - 任务总结
   - session id / resume 来源
   - 修改文件清单
   - 状态码

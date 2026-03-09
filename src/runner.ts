@@ -241,7 +241,6 @@ export async function writeResultFile(
     taskSummary: context.taskSummary,
     startedAt: context.startedAt,
     finishedAt,
-    durationSeconds: calculateDurationSeconds(context.startedAt, finishedAt),
     durationMinutes: calculateDurationMinutes(context.startedAt, finishedAt),
     exitCode,
     status,
@@ -280,12 +279,11 @@ async function buildNotificationText(
     `- 状态: ${status} (exit ${exitCode})`,
     `- 开始: ${context.startedAt}`,
     `- 完成: ${result?.finishedAt ?? "unknown"}`,
-    `- 总时长(分钟): ${result?.durationMinutes ?? "unknown"}`,
-    `- 耗时(秒): ${result?.durationSeconds ?? "unknown"}`,
+    `- 耗时(分钟): ${result?.durationMinutes ?? "unknown"}`,
     `- 目录: ${options.cwd}`,
     `- Run ID: ${context.runId}`,
-    `- 任务摘要: ${context.taskSummary}`,
-    `- Agent 摘要: ${agentSummary || "(none)"}`,
+    `- 任务目标: ${context.taskSummary}`,
+    `- 任务总结: ${agentSummary || "(none)"}`,
     `- Session ID: ${result?.sessionId ?? "unknown"}`,
     `- Resume 来源: ${result?.resumedFromSessionId ?? "(new session)"}`,
     `- 修改文件: ${modifiedPreview}`,
@@ -738,7 +736,7 @@ function extractSessionId(agent: CliOptions["agent"], output: string): string | 
 
 function formatModifiedFiles(files: string[]): string {
   if (files.length === 0) {
-    return "(none detected)";
+    return "(本次未检测到工作区文件变更)";
   }
   const preview = files.slice(0, 8).join(", ");
   return files.length > 8 ? `${preview}, ... (+${files.length - 8} more)` : preview;

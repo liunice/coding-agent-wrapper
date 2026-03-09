@@ -65,7 +65,6 @@ export interface RunResult {
   taskSummary: string;
   startedAt: string;
   finishedAt: string | null;
-  durationSeconds: number | null;
   durationMinutes: number | null;
   exitCode: number | null;
   status: RunStatus;
