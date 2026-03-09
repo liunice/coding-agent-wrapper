@@ -60,6 +60,7 @@
   - `commitId`
 - 用户通知里的 `【修改文件】` 默认只展示项目改动；wrapper 产物（如 `agent-summary.txt` / `agent-report.json`）会单独归类到 `artifactFiles`
 - 默认会按 `agent + cwd` 记录并复用最近一次 session id；只有显式传 `--new-session` 时才禁用 resume
+- session id 现在会先在子进程 `stdout/stderr` 流式输出阶段实时提取并缓存；若仍未识别，进程结束后会再扫描完整 `run.log` 做兜底，避免长日志截断导致丢失 session id
 
 ## 安装
 
@@ -169,4 +170,3 @@ pnpm lint
 - 增加更多 agent 适配器
 - 增加结果 JSON 的更强结构化字段
 - 增加任务列表与最近运行查询
-

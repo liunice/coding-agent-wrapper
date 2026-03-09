@@ -4,13 +4,18 @@
  */
 
 import { spawn } from "node:child_process";
-import { accessSync, constants, createWriteStream } from "node:fs";
 import { execFile } from "node:child_process";
+import { constants, accessSync, createWriteStream } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { createAgentLaunchSpec } from "./adapters";
 import { getCodingAssistantSkillConfig } from "./config";
+import {
+  createSessionDetectionState,
+  detectSessionIdFromStream,
+  extractSessionId,
+} from "./session-id";
 import { saveResumeSessionId } from "./sessions";
 import type {
   AgentReport,
@@ -149,23 +154,39 @@ export async function executeRun(
 
     let capturedStdout = "";
     let capturedStderr = "";
+    const sessionDetection = createSessionDetectionState();
+
+    const handleChildText = (
+      streamName: "stdout" | "stderr",
+      text: string,
+    ): void => {
+      if (streamName === "stdout") {
+        capturedStdout = appendCapturedText(capturedStdout, text);
+      } else {
+        capturedStderr = appendCapturedText(capturedStderr, text);
+      }
+
+      detectSessionIdFromStream(options.agent, sessionDetection, text);
+      logStream.write(text);
+
+      if (options.internalRun) {
+        return;
+      }
+
+      if (streamName === "stdout") {
+        process.stdout.write(text);
+        return;
+      }
+
+      process.stderr.write(text);
+    };
 
     child.stdout?.on("data", (chunk: Buffer) => {
-      const text = chunk.toString();
-      capturedStdout = appendCapturedText(capturedStdout, text);
-      logStream.write(text);
-      if (!options.internalRun) {
-        process.stdout.write(text);
-      }
+      handleChildText("stdout", chunk.toString());
     });
 
     child.stderr?.on("data", (chunk: Buffer) => {
-      const text = chunk.toString();
-      capturedStderr = appendCapturedText(capturedStderr, text);
-      logStream.write(text);
-      if (!options.internalRun) {
-        process.stderr.write(text);
-      }
+      handleChildText("stderr", chunk.toString());
     });
 
     const exitCode = await new Promise<number>((resolve) => {
@@ -179,10 +200,16 @@ export async function executeRun(
     });
 
     const status: RunStatus = exitCode === 0 ? "success" : "failed";
-    const sessionId = extractSessionId(
-      options.agent,
-      `${capturedStdout}\n${capturedStderr}`,
-    );
+    let sessionId = sessionDetection.sessionId;
+
+    if (!sessionId) {
+      sessionId = await extractSessionIdFromRunLog(
+        options.agent,
+        context.logPath,
+        logStream,
+      );
+    }
+
     if (sessionId) {
       await saveResumeSessionId(
         options.outputRoot,
@@ -235,15 +262,25 @@ export async function writeResultFile(
 ): Promise<void> {
   const agentSummary = await readOptionalText(context.summaryPath);
   const report = await readAgentReport(context.reportPath);
-  const detectedModifiedFiles = await collectModifiedFiles(context.repoSnapshot);
+  const detectedModifiedFiles = await collectModifiedFiles(
+    context.repoSnapshot,
+  );
   const artifactFiles =
     normalizeStringList(report?.artifactFiles) ??
     detectArtifactFiles(normalizeStringList(report?.modifiedFiles) ?? []);
-  const explicitProjectModifiedFiles = normalizeStringList(report?.projectModifiedFiles);
-  const fallbackModifiedFiles = excludeArtifactFiles(detectedModifiedFiles, artifactFiles);
+  const explicitProjectModifiedFiles = normalizeStringList(
+    report?.projectModifiedFiles,
+  );
+  const fallbackModifiedFiles = excludeArtifactFiles(
+    detectedModifiedFiles,
+    artifactFiles,
+  );
   const projectModifiedFiles =
     explicitProjectModifiedFiles ??
-    excludeArtifactFiles(normalizeStringList(report?.modifiedFiles) ?? fallbackModifiedFiles, artifactFiles);
+    excludeArtifactFiles(
+      normalizeStringList(report?.modifiedFiles) ?? fallbackModifiedFiles,
+      artifactFiles,
+    );
   const validation = normalizeStringList(report?.validation) ?? [];
 
   const payload: RunResult = {
@@ -290,10 +327,13 @@ async function buildNotificationText(
 ): Promise<string> {
   const name = options.label ?? context.runId;
   const result = await readRunResult(context.resultPath);
-  const modifiedLines = formatModifiedFileLines(result?.projectModifiedFiles ?? []);
+  const modifiedLines = formatModifiedFileLines(
+    result?.projectModifiedFiles ?? [],
+  );
   const agentSummary = result?.agentSummary ?? "";
   const validationSummary =
-    result?.validationSummary ?? formatValidationSummary(result?.validation ?? []);
+    result?.validationSummary ??
+    formatValidationSummary(result?.validation ?? []);
 
   return [
     `后台任务已完成：${name}`,
@@ -462,7 +502,9 @@ function resolveOpenClawBinary(): string | null {
     process.env.npm_config_prefix
       ? path.join(process.env.npm_config_prefix, "bin", "openclaw")
       : null,
-    process.env.HOME ? path.join(process.env.HOME, ".npm-global/bin/openclaw") : null,
+    process.env.HOME
+      ? path.join(process.env.HOME, ".npm-global/bin/openclaw")
+      : null,
     "/volume1/homes/liunice/.npm-global/bin/openclaw",
     "/usr/local/bin/openclaw",
     "/usr/bin/openclaw",
@@ -477,7 +519,9 @@ function resolveOpenClawBinary(): string | null {
     }
   }
 
-  const pathEntries = (process.env.PATH ?? "").split(path.delimiter).filter(Boolean);
+  const pathEntries = (process.env.PATH ?? "")
+    .split(path.delimiter)
+    .filter(Boolean);
   for (const entry of pathEntries) {
     const candidate = path.join(entry, "openclaw");
     try {
@@ -631,6 +675,20 @@ function appendCapturedText(current: string, next: string): string {
   return merged.slice(-MAX_CAPTURED_OUTPUT);
 }
 
+/**
+ * Flushes child output to disk and scans the full run log when stream-time
+ * detection did not find a session id.
+ */
+async function extractSessionIdFromRunLog(
+  agent: CliOptions["agent"],
+  logPath: string,
+  logStream: ReturnType<typeof createWriteStream>,
+): Promise<string | null> {
+  await flushLogStream(logStream);
+  const fullLog = await readOptionalText(logPath);
+  return fullLog ? extractSessionId(agent, fullLog) : null;
+}
+
 /** Reads a UTF-8 text file if it exists, otherwise returns null. */
 async function readOptionalText(filePath: string): Promise<string | null> {
   try {
@@ -724,7 +782,7 @@ function parseGitStatus(output: string): Record<string, string> {
     const status = line.slice(0, 2);
     const rawPath = line.slice(3).trim();
     const path = rawPath.includes(" -> ")
-      ? rawPath.split(" -> ").at(-1) ?? rawPath
+      ? (rawPath.split(" -> ").at(-1) ?? rawPath)
       : rawPath;
     entries[path] = status;
   }
@@ -791,32 +849,6 @@ function formatDisplayTime(value: string | null): string {
   return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second} GMT+8`;
 }
 
-function extractSessionId(agent: CliOptions["agent"], output: string): string | null {
-  if (!output.trim()) {
-    return null;
-  }
-
-  if (agent === "codex") {
-    const match = output.match(/session id:\s*([0-9a-f-]{36})/i);
-    return match?.[1] ?? null;
-  }
-
-  if (agent === "claude") {
-    for (const line of output.split(/\r?\n/).reverse()) {
-      try {
-        const parsed = JSON.parse(line) as { session_id?: unknown };
-        if (typeof parsed.session_id === "string" && parsed.session_id.trim()) {
-          return parsed.session_id;
-        }
-      } catch {
-        // ignore non-JSON lines
-      }
-    }
-  }
-
-  return null;
-}
-
 function formatValidationSummary(validation: string[]): string | null {
   if (validation.length === 0) {
     return null;
@@ -824,7 +856,9 @@ function formatValidationSummary(validation: string[]): string | null {
   return validation.slice(0, 3).join(", ");
 }
 
-function normalizeStringList(value: string[] | null | undefined): string[] | null {
+function normalizeStringList(
+  value: string[] | null | undefined,
+): string[] | null {
   if (!Array.isArray(value)) {
     return null;
   }
@@ -835,7 +869,9 @@ function normalizeStringList(value: string[] | null | undefined): string[] | nul
     .filter(Boolean);
 }
 
-function normalizeOptionalString(value: string | null | undefined): string | null {
+function normalizeOptionalString(
+  value: string | null | undefined,
+): string | null {
   if (typeof value !== "string") {
     return null;
   }
@@ -845,10 +881,17 @@ function normalizeOptionalString(value: string | null | undefined): string | nul
 }
 
 function detectArtifactFiles(files: string[]): string[] {
-  return files.filter((file) => /(^|\/)runs\/[^/]+\/(agent-summary\.txt|agent-report\.json|result\.json|run\.log)$/.test(file));
+  return files.filter((file) =>
+    /(^|\/)runs\/[^/]+\/(agent-summary\.txt|agent-report\.json|result\.json|run\.log)$/.test(
+      file,
+    ),
+  );
 }
 
-function excludeArtifactFiles(files: string[], artifactFiles: string[]): string[] {
+function excludeArtifactFiles(
+  files: string[],
+  artifactFiles: string[],
+): string[] {
   const artifactSet = new Set(artifactFiles);
   return files.filter((file) => !artifactSet.has(file));
 }
@@ -895,5 +938,24 @@ async function closeLogStream(
 ): Promise<void> {
   await new Promise<void>((resolve) => {
     logStream.end(() => resolve());
+  });
+}
+
+/** Waits until prior writes are flushed so follow-up log reads see full output. */
+async function flushLogStream(
+  logStream: ReturnType<typeof createWriteStream>,
+): Promise<void> {
+  if (logStream.destroyed) {
+    return;
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    logStream.write("", (error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    });
   });
 }

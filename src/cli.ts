@@ -142,8 +142,13 @@ function parseCliArgs(argv: string[]): CliOptions | null {
     return null;
   }
 
-  if ((notifyChannel || notifyAccount || notifyReplyTo || notifyThreadId) && !notifyTarget) {
-    throw new Error("--notify-target is required when using notify delivery flags");
+  if (
+    (notifyChannel || notifyAccount || notifyReplyTo || notifyThreadId) &&
+    !notifyTarget
+  ) {
+    throw new Error(
+      "--notify-target is required when using notify delivery flags",
+    );
   }
 
   return {
