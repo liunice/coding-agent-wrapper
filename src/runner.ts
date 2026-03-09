@@ -282,36 +282,44 @@ async function buildNotificationText(
 ): Promise<string> {
   const name = options.label ?? context.runId;
   const result = await readRunResult(context.resultPath);
-  const modifiedPreview = formatModifiedFiles(result?.modifiedFiles ?? []);
+  const modifiedLines = formatModifiedFileLines(result?.modifiedFiles ?? []);
   const agentSummary = result?.agentSummary ?? "";
   const validationSummary =
     result?.validationSummary ?? formatValidationSummary(result?.validation ?? []);
 
   return [
     `后台任务已完成：${name}`,
-    `- Agent: ${options.agent}`,
-    `- 状态: ${status} (exit ${exitCode})`,
-    `- Run ID: ${context.runId}`,
-    `- 目录: ${options.cwd}`,
     "",
-    `- 开始: ${context.startedAt}`,
-    `- 完成: ${result?.finishedAt ?? "unknown"}`,
-    `- 耗时(分钟): ${result?.durationMinutes ?? "unknown"}`,
+    "【任务信息】",
+    `• Agent: ${options.agent}`,
+    `• 状态: ${status} (exit ${exitCode})`,
+    `• Run ID: ${context.runId}`,
+    `• 目录: ${options.cwd}`,
     "",
-    `- 任务目标: ${context.taskSummary}`,
-    `- 任务总结: ${agentSummary || "(none)"}`,
+    "【时间】",
+    `• 开始: ${context.startedAt}`,
+    `• 完成: ${result?.finishedAt ?? "unknown"}`,
+    `• 耗时(分钟): ${result?.durationMinutes ?? "unknown"}`,
     "",
-    `- 验证: ${validationSummary || "(未提供)"}`,
+    "【任务】",
+    `• 任务目标: ${context.taskSummary}`,
+    `• 任务总结: ${agentSummary || "(none)"}`,
     "",
-    `- Session ID: ${result?.sessionId ?? "unknown"}`,
-    `- Resume 来源: ${result?.resumedFromSessionId ?? "(new session)"}`,
-    `- Commit ID: ${result?.commitId ?? "(none)"}`,
+    "【会话 / 验证 / 提交】",
+    `• 验证: ${validationSummary || "(未提供)"}`,
+    `• Session ID: ${result?.sessionId ?? "unknown"}`,
+    `• Resume 来源: ${result?.resumedFromSessionId ?? "(new session)"}`,
+    `• Commit ID: ${result?.commitId ?? "(none)"}`,
     "",
-    `- 修改文件: ${modifiedPreview}`,
-    `- 备注: ${result?.notes ?? "(none)"}`,
+    "【修改文件】",
+    ...modifiedLines,
     "",
-    `- 结果文件: ${context.resultPath}`,
-    `- 日志文件: ${context.logPath}`,
+    "【备注】",
+    `• ${result?.notes ?? "(none)"}`,
+    "",
+    "【产物】",
+    `• 结果文件: ${context.resultPath}`,
+    `• 日志文件: ${context.logPath}`,
   ].join("\n");
 }
 
@@ -797,12 +805,17 @@ function normalizeOptionalString(value: string | null | undefined): string | nul
   return trimmed || null;
 }
 
-function formatModifiedFiles(files: string[]): string {
+function formatModifiedFileLines(files: string[]): string[] {
   if (files.length === 0) {
-    return "(本次未检测到工作区文件变更)";
+    return ["• (本次未检测到工作区文件变更)"];
   }
-  const preview = files.slice(0, 8).join(", ");
-  return files.length > 8 ? `${preview}, ... (+${files.length - 8} more)` : preview;
+
+  const limit = 20;
+  const lines = files.slice(0, limit).map((file) => `• ${file}`);
+  if (files.length > limit) {
+    lines.push(`• ... (+${files.length - limit} more)`);
+  }
+  return lines;
 }
 
 async function runGit(args: string[], cwd: string): Promise<string | null> {
