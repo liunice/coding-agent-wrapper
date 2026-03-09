@@ -368,8 +368,8 @@ async function buildNotificationText(
     `• ${result?.notes ?? "(none)"}`,
     "",
     "**【产物】**",
-    `• 结果文件: ${formatArtifactPath(options.cwd, context.resultPath)}`,
-    `• 日志文件: ${formatArtifactPath(options.cwd, context.logPath)}`,
+    `• 结果文件: ${formatRunArtifactPath(context.runId, context.resultPath)}`,
+    `• 日志文件: ${formatRunArtifactPath(context.runId, context.logPath)}`,
   ].join("\n");
 }
 
@@ -885,18 +885,9 @@ function formatValidationSummary(validation: string[]): string | null {
   return validation.slice(0, 3).join(", ");
 }
 
-function formatArtifactPath(projectCwd: string, filePath: string): string {
-  const relativePath = path.relative(projectCwd, filePath);
-
-  if (
-    relativePath &&
-    !relativePath.startsWith("..") &&
-    !path.isAbsolute(relativePath)
-  ) {
-    return relativePath;
-  }
-
-  return filePath;
+function formatRunArtifactPath(runId: string, filePath: string): string {
+  const fileName = path.basename(filePath);
+  return `runs/${runId}/${fileName}`;
 }
 
 function normalizeStringList(
