@@ -74,6 +74,7 @@ export async function acquireActiveRunClaim(
 ): Promise<ActiveRunClaimHandle> {
   const resolvedCwd = path.resolve(cwd);
   const paths = getActiveRunLockPaths(outputRoot, agent, resolvedCwd);
+  await mkdir(path.dirname(paths.lockDir), { recursive: true });
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const record = await buildClaimRecord(agent, resolvedCwd, context);
@@ -193,14 +194,14 @@ export function getActiveRunLockPaths(
 ): { claimFilePath: string; lockDir: string } {
   const resolvedCwd = path.resolve(cwd);
   const hash = createHash("sha1")
-    .update(`${agent}::${resolvedCwd}`)
+    .update(resolvedCwd)
     .digest("hex")
     .slice(0, 16);
   const suffix = sanitizeSegment(path.basename(resolvedCwd) || "root");
   const lockDir = path.resolve(
     outputRoot,
     ACTIVE_RUNS_DIR,
-    `${agent}-${suffix}-${hash}`,
+    `${suffix}-${hash}`,
   );
 
   return {

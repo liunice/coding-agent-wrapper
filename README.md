@@ -61,7 +61,7 @@
 - 用户通知里的 `【修改文件】` 默认只展示项目改动；wrapper 产物（如 `agent-summary.txt` / `agent-report.json`）会单独归类到 `artifactFiles`
 - 默认会按 `agent + cwd` 记录并复用最近一次 session id；只有显式传 `--new-session` 时才禁用 resume
 - session id 现在会先在子进程 `stdout/stderr` 流式输出阶段实时提取并缓存；若仍未识别，进程结束后会再扫描完整 `run.log` 做兜底，避免长日志截断导致丢失 session id
-- 默认对同一个 `agent + cwd` 启用 same-project single-flight：同一项目同一 agent 同时只允许一个活跃 run，新 run 会在启动前先尝试原子 claim active lock
+- 默认对同一个 `cwd` 启用 same-project single-flight：同一项目目录同时只允许一个活跃 run，不区分 `codex` / `claude`；新 run 会在启动前先尝试原子 claim active lock
 - stale recovery 以 active lock + `result.json` 运行态组合判断：优先检查 `pid` 是否仍存活、Linux 下 `/proc/<pid>/stat` 启动时钟是否匹配，以及 `result.json` 是否已经结束；不会仅凭 heartbeat / 日志静默时间驱逐
 
 ## 安装

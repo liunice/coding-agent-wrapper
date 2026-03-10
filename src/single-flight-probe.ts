@@ -152,7 +152,7 @@ async function assertActiveRunIsRejected(
         cliPath,
         "run",
         "--agent",
-        "codex",
+        "claude",
         "--cwd",
         fakeRepo,
         "--task",
@@ -174,6 +174,7 @@ async function assertActiveRunIsRejected(
     assert.notEqual(secondRun.status, 0, "second run should be rejected");
     assert.match(secondRun.stderr, /同一项目已有活跃 run/);
     assert.match(secondRun.stderr, new RegExp(activeRunId));
+    assert.match(secondRun.stderr, /Agent: codex/);
     assert.match(secondRun.stderr, new RegExp(escapeRegExp(fakeRepo)));
   } finally {
     await waitForExit(firstRun);
