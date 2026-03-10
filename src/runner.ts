@@ -17,12 +17,20 @@ import {
   extractSessionId,
 } from "./session-id";
 import { saveResumeSessionId } from "./sessions";
+import {
+  acquireActiveRunClaim,
+  adoptActiveRunClaim,
+  getRunRuntimeState,
+  releaseActiveRunClaim,
+  transferActiveRunClaim,
+} from "./single-flight";
 import type {
   AgentReport,
   CliOptions,
   RepoSnapshot,
   RunContext,
   RunResult,
+  RunRuntimeState,
   RunStatus,
 } from "./types";
 
@@ -62,68 +70,100 @@ export async function launchDetached(
   options: CliOptions,
   context: RunContext,
 ): Promise<void> {
-  await writeResultFile(
-    options,
+  const claim = await acquireActiveRunClaim(
+    options.outputRoot,
+    options.agent,
+    options.cwd,
     context,
-    "running",
-    null,
-    null,
-    "Detached run started.",
   );
 
-  const cliPath = path.resolve(process.argv[1]);
-  const args = [
-    cliPath,
-    "run",
-    "--internal-run",
-    "--agent",
-    options.agent,
-    "--cwd",
-    options.cwd,
-    "--task",
-    options.task,
-    "--output-root",
-    options.outputRoot,
-    "--run-id",
-    context.runId,
-    "--started-at",
-    context.startedAt,
-  ];
+  try {
+    await writeResultFile(
+      options,
+      context,
+      "running",
+      null,
+      null,
+      "Detached run started.",
+      null,
+      null,
+      getRunRuntimeState(claim),
+    );
 
-  if (options.label) {
-    args.push("--label", options.label);
-  }
+    const cliPath = path.resolve(process.argv[1]);
+    const args = [
+      cliPath,
+      "run",
+      "--internal-run",
+      "--agent",
+      options.agent,
+      "--cwd",
+      options.cwd,
+      "--task",
+      options.task,
+      "--output-root",
+      options.outputRoot,
+      "--run-id",
+      context.runId,
+      "--started-at",
+      context.startedAt,
+    ];
 
-  if (options.notifySessionKey) {
-    args.push("--notify-session-key", options.notifySessionKey);
-  }
-  if (options.notifyChannel) {
-    args.push("--notify-channel", options.notifyChannel);
-  }
-  if (options.notifyTarget) {
-    args.push("--notify-target", options.notifyTarget);
-  }
-  if (options.notifyAccount) {
-    args.push("--notify-account", options.notifyAccount);
-  }
-  if (options.notifyReplyTo) {
-    args.push("--notify-reply-to", options.notifyReplyTo);
-  }
-  if (options.notifyThreadId) {
-    args.push("--notify-thread-id", options.notifyThreadId);
-  }
+    if (options.label) {
+      args.push("--label", options.label);
+    }
 
-  if (options.passthroughArgs.length > 0) {
-    args.push("--", ...options.passthroughArgs);
+    if (options.notifySessionKey) {
+      args.push("--notify-session-key", options.notifySessionKey);
+    }
+    if (options.notifyChannel) {
+      args.push("--notify-channel", options.notifyChannel);
+    }
+    if (options.notifyTarget) {
+      args.push("--notify-target", options.notifyTarget);
+    }
+    if (options.notifyAccount) {
+      args.push("--notify-account", options.notifyAccount);
+    }
+    if (options.notifyReplyTo) {
+      args.push("--notify-reply-to", options.notifyReplyTo);
+    }
+    if (options.notifyThreadId) {
+      args.push("--notify-thread-id", options.notifyThreadId);
+    }
+
+    if (options.passthroughArgs.length > 0) {
+      args.push("--", ...options.passthroughArgs);
+    }
+
+    const child = spawn(process.execPath, args, {
+      detached: true,
+      stdio: "ignore",
+      env: process.env,
+    });
+
+    if (!child.pid) {
+      throw new Error("Failed to determine detached wrapper pid.");
+    }
+
+    await transferActiveRunClaim(claim, child.pid);
+    await writeResultFile(
+      options,
+      context,
+      "running",
+      null,
+      null,
+      "Detached run started.",
+      null,
+      null,
+      getRunRuntimeState(claim),
+    );
+
+    child.unref();
+  } catch (error) {
+    await releaseActiveRunClaim(claim);
+    throw error;
   }
-
-  const child = spawn(process.execPath, args, {
-    detached: true,
-    stdio: "ignore",
-    env: process.env,
-  });
-
-  child.unref();
 }
 
 /** Executes one agent run and returns the final process exit code. */
@@ -131,121 +171,150 @@ export async function executeRun(
   options: CliOptions,
   context: RunContext,
 ): Promise<number> {
-  await writeResultFile(
-    options,
-    context,
-    "running",
-    null,
-    null,
-    "Run started.",
-  );
-
-  const spec = await createAgentLaunchSpec(options, context);
-  const logStream = createWriteStream(context.logPath, { flags: "a" });
-
-  try {
-    logStream.write(buildLogHeader(options, context, spec.command, spec.args));
-
-    const child = spawn(spec.command, spec.args, {
-      cwd: options.cwd,
-      env: spec.env,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-
-    let capturedStdout = "";
-    let capturedStderr = "";
-    const sessionDetection = createSessionDetectionState();
-
-    const handleChildText = (
-      streamName: "stdout" | "stderr",
-      text: string,
-    ): void => {
-      if (streamName === "stdout") {
-        capturedStdout = appendCapturedText(capturedStdout, text);
-      } else {
-        capturedStderr = appendCapturedText(capturedStderr, text);
-      }
-
-      detectSessionIdFromStream(options.agent, sessionDetection, text);
-      logStream.write(text);
-
-      if (options.internalRun) {
-        return;
-      }
-
-      if (streamName === "stdout") {
-        process.stdout.write(text);
-        return;
-      }
-
-      process.stderr.write(text);
-    };
-
-    child.stdout?.on("data", (chunk: Buffer) => {
-      handleChildText("stdout", chunk.toString());
-    });
-
-    child.stderr?.on("data", (chunk: Buffer) => {
-      handleChildText("stderr", chunk.toString());
-    });
-
-    const exitCode = await new Promise<number>((resolve) => {
-      child.on("close", (code) => resolve(code ?? 1));
-      child.on("error", (error) => {
-        logStream.write(
-          `\n[wrapper] Failed to spawn child process: ${error.message}\n`,
-        );
-        resolve(1);
-      });
-    });
-
-    const status: RunStatus = exitCode === 0 ? "success" : "failed";
-    let sessionId = sessionDetection.sessionId;
-
-    if (!sessionId) {
-      sessionId = await extractSessionIdFromRunLog(
-        options.agent,
-        context.logPath,
-        logStream,
-      );
-    }
-
-    if (sessionId) {
-      await saveResumeSessionId(
+  const claim = options.internalRun
+    ? await adoptActiveRunClaim(
         options.outputRoot,
         options.agent,
         options.cwd,
-        sessionId,
+        context,
+      )
+    : await acquireActiveRunClaim(
+        options.outputRoot,
+        options.agent,
+        options.cwd,
+        context,
       );
-      logStream.write(`[wrapper] sessionId=${sessionId}\n`);
-    }
 
-    const summary = await buildSummary(
-      context,
-      capturedStdout,
-      capturedStderr,
-      exitCode,
-    );
+  let logStream: ReturnType<typeof createWriteStream> | null = null;
 
+  try {
     await writeResultFile(
       options,
       context,
-      status,
-      exitCode,
-      new Date().toISOString(),
-      summary,
-      sessionId,
-      spec.resumedSessionId ?? null,
-    );
-    await notifyCompletion(
-      options,
-      await buildNotificationText(options, context, status, exitCode),
-      logStream,
+      "running",
+      null,
+      null,
+      "Run started.",
+      null,
+      null,
+      getRunRuntimeState(claim),
     );
 
-    return exitCode;
+    const spec = await createAgentLaunchSpec(options, context);
+    logStream = createWriteStream(context.logPath, { flags: "a" });
+    const activeLogStream = logStream;
+
+    try {
+      activeLogStream.write(
+        buildLogHeader(options, context, spec.command, spec.args),
+      );
+
+      const child = spawn(spec.command, spec.args, {
+        cwd: options.cwd,
+        env: spec.env,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+
+      let capturedStdout = "";
+      let capturedStderr = "";
+      const sessionDetection = createSessionDetectionState();
+
+      const handleChildText = (
+        streamName: "stdout" | "stderr",
+        text: string,
+      ): void => {
+        if (streamName === "stdout") {
+          capturedStdout = appendCapturedText(capturedStdout, text);
+        } else {
+          capturedStderr = appendCapturedText(capturedStderr, text);
+        }
+
+        detectSessionIdFromStream(options.agent, sessionDetection, text);
+        activeLogStream.write(text);
+
+        if (options.internalRun) {
+          return;
+        }
+
+        if (streamName === "stdout") {
+          process.stdout.write(text);
+          return;
+        }
+
+        process.stderr.write(text);
+      };
+
+      child.stdout?.on("data", (chunk: Buffer) => {
+        handleChildText("stdout", chunk.toString());
+      });
+
+      child.stderr?.on("data", (chunk: Buffer) => {
+        handleChildText("stderr", chunk.toString());
+      });
+
+      const exitCode = await new Promise<number>((resolve) => {
+        child.on("close", (code) => resolve(code ?? 1));
+        child.on("error", (error) => {
+          activeLogStream.write(
+            `\n[wrapper] Failed to spawn child process: ${error.message}\n`,
+          );
+          resolve(1);
+        });
+      });
+
+      const status: RunStatus = exitCode === 0 ? "success" : "failed";
+      let sessionId = sessionDetection.sessionId;
+
+      if (!sessionId) {
+        sessionId = await extractSessionIdFromRunLog(
+          options.agent,
+          context.logPath,
+          activeLogStream,
+        );
+      }
+
+      if (sessionId) {
+        await saveResumeSessionId(
+          options.outputRoot,
+          options.agent,
+          options.cwd,
+          sessionId,
+        );
+        activeLogStream.write(`[wrapper] sessionId=${sessionId}\n`);
+      }
+
+      const summary = await buildSummary(
+        context,
+        capturedStdout,
+        capturedStderr,
+        exitCode,
+      );
+
+      await writeResultFile(
+        options,
+        context,
+        status,
+        exitCode,
+        new Date().toISOString(),
+        summary,
+        sessionId,
+        spec.resumedSessionId ?? null,
+        getRunRuntimeState(claim, buildTerminationReason(status, exitCode)),
+      );
+      await notifyCompletion(
+        options,
+        await buildNotificationText(options, context, status, exitCode),
+        activeLogStream,
+      );
+
+      return exitCode;
+    } finally {
+      if (logStream) {
+        await closeLogStream(logStream);
+      }
+    }
   } finally {
-    await closeLogStream(logStream);
+    await releaseActiveRunClaim(claim);
   }
 }
 
@@ -259,6 +328,11 @@ export async function writeResultFile(
   summary: string,
   sessionId: string | null = null,
   resumedFromSessionId: string | null = null,
+  runtimeState: RunRuntimeState = {
+    pid: null,
+    claimedAt: null,
+    terminationReason: null,
+  },
 ): Promise<void> {
   const agentSummary = await readOptionalText(context.summaryPath);
   const report = await readAgentReport(context.reportPath);
@@ -306,6 +380,9 @@ export async function writeResultFile(
     commitId: normalizeOptionalString(report?.commitId),
     sessionId,
     resumedFromSessionId,
+    pid: runtimeState.pid,
+    claimedAt: runtimeState.claimedAt,
+    terminationReason: runtimeState.terminationReason,
     modifiedFiles: projectModifiedFiles,
     projectModifiedFiles,
     artifactFiles,
@@ -845,6 +922,22 @@ function calculateDurationMinutes(
     return null;
   }
   return Number((seconds / 60).toFixed(1));
+}
+
+/** Maps the final wrapper status into a compact result termination reason. */
+function buildTerminationReason(
+  status: RunStatus,
+  exitCode: number | null,
+): string | null {
+  if (status === "running") {
+    return null;
+  }
+
+  if (status === "success") {
+    return "completed";
+  }
+
+  return typeof exitCode === "number" ? `exit-${exitCode}` : "failed";
 }
 
 function formatDisplayTime(value: string | null): string {

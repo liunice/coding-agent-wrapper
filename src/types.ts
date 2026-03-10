@@ -93,7 +93,17 @@ export interface RunResult {
   commitId: string | null;
   sessionId: string | null;
   resumedFromSessionId: string | null;
+  pid: number | null;
+  claimedAt: string | null;
+  terminationReason: string | null;
   modifiedFiles: string[];
   projectModifiedFiles: string[];
   artifactFiles: string[];
+}
+
+/** Describes the runtime ownership fields persisted into result.json. */
+export interface RunRuntimeState {
+  pid: number | null;
+  claimedAt: string | null;
+  terminationReason: string | null;
 }

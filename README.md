@@ -61,6 +61,8 @@
 - 用户通知里的 `【修改文件】` 默认只展示项目改动；wrapper 产物（如 `agent-summary.txt` / `agent-report.json`）会单独归类到 `artifactFiles`
 - 默认会按 `agent + cwd` 记录并复用最近一次 session id；只有显式传 `--new-session` 时才禁用 resume
 - session id 现在会先在子进程 `stdout/stderr` 流式输出阶段实时提取并缓存；若仍未识别，进程结束后会再扫描完整 `run.log` 做兜底，避免长日志截断导致丢失 session id
+- 默认对同一个 `agent + cwd` 启用 same-project single-flight：同一项目同一 agent 同时只允许一个活跃 run，新 run 会在启动前先尝试原子 claim active lock
+- stale recovery 以 active lock + `result.json` 运行态组合判断：优先检查 `pid` 是否仍存活、Linux 下 `/proc/<pid>/stat` 启动时钟是否匹配，以及 `result.json` 是否已经结束；不会仅凭 heartbeat / 日志静默时间驱逐
 
 ## 安装
 
@@ -142,6 +144,12 @@ runs/<runId>/result.json
 - `logPath`
 - `summary`
 
+当前运行中的 `result.json` 还会写入：
+
+- `pid`
+- `claimedAt`
+- `terminationReason`
+
 ## 设计说明
 
 - 保持为普通 CLI，不做服务化
@@ -153,6 +161,7 @@ runs/<runId>/result.json
 ## 当前限制
 
 - 第一版没有实现任务队列、并发控制、重试策略
+- 当前默认不支持同一个 `agent + cwd` 的并行 run；若 future 需要并行，应结合 git worktree 单独设计，而不是绕过 single-flight
 - 第一版没有统一抽象所有代理的结构化输出协议
 - `Claude Code` 目前重点是命令拼装与运行骨架，深度适配仍待继续补充
 - 后台任务由当前机器本地进程负责，不包含守护进程恢复能力
