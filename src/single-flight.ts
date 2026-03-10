@@ -5,7 +5,7 @@
  */
 
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import type {
@@ -17,9 +17,6 @@ import type {
 
 /** Stores the active lock directory name under the output root. */
 const ACTIVE_RUNS_DIR = "active-runs";
-
-/** Stores the metadata file name inside each active lock directory. */
-const CLAIM_FILE_NAME = "claim.json";
 
 /** Captures the persisted metadata for one active run claim. */
 interface ActiveRunClaimRecord {
@@ -37,7 +34,6 @@ interface ActiveRunClaimRecord {
 /** Carries the claimed lock state needed for result writing and release. */
 export interface ActiveRunClaimHandle {
   claimFilePath: string;
-  lockDir: string;
   record: ActiveRunClaimRecord;
   recoveredStaleReason: string | null;
   released: boolean;
@@ -74,17 +70,15 @@ export async function acquireActiveRunClaim(
 ): Promise<ActiveRunClaimHandle> {
   const resolvedCwd = path.resolve(cwd);
   const paths = getActiveRunLockPaths(outputRoot, agent, resolvedCwd);
-  await mkdir(path.dirname(paths.lockDir), { recursive: true });
+  await mkdir(path.dirname(paths.claimFilePath), { recursive: true });
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const record = await buildClaimRecord(agent, resolvedCwd, context);
 
     try {
-      await mkdir(paths.lockDir);
-      await writeClaimRecord(paths.claimFilePath, record);
+      await writeClaimRecordAtomically(paths.claimFilePath, record);
       return {
         claimFilePath: paths.claimFilePath,
-        lockDir: paths.lockDir,
         record,
         recoveredStaleReason: null,
         released: false,
@@ -99,18 +93,16 @@ export async function acquireActiveRunClaim(
         throw new SingleFlightError(existing.blockingRun);
       }
 
-      await rm(paths.lockDir, { recursive: true, force: true });
+      await rm(paths.claimFilePath, { force: true });
       if (attempt === 2) {
         throw new Error(
-          `Failed to recover stale active lock for ${agent} at ${resolvedCwd}.`,
+          `Failed to recover stale active lock for ${resolvedCwd}.`,
         );
       }
     }
   }
 
-  throw new Error(
-    `Failed to claim active lock for ${agent} at ${resolvedCwd}.`,
-  );
+  throw new Error(`Failed to claim active lock for ${resolvedCwd}.`);
 }
 
 /** Adopts an existing detached-run claim or acquires a fresh one when missing. */
@@ -132,7 +124,6 @@ export async function adoptActiveRunClaim(
   await writeClaimRecord(paths.claimFilePath, adopted);
   return {
     claimFilePath: paths.claimFilePath,
-    lockDir: paths.lockDir,
     record: adopted,
     recoveredStaleReason: null,
     released: false,
@@ -171,7 +162,7 @@ export async function releaseActiveRunClaim(
     return;
   }
 
-  await rm(handle.lockDir, { recursive: true, force: true });
+  await rm(handle.claimFilePath, { force: true });
 }
 
 /** Exposes the runtime ownership fields that should be written into result.json. */
@@ -191,22 +182,15 @@ export function getActiveRunLockPaths(
   outputRoot: string,
   agent: SupportedAgent,
   cwd: string,
-): { claimFilePath: string; lockDir: string } {
+): { claimFilePath: string } {
   const resolvedCwd = path.resolve(cwd);
   const hash = createHash("sha1")
     .update(resolvedCwd)
     .digest("hex")
     .slice(0, 16);
-  const suffix = sanitizeSegment(path.basename(resolvedCwd) || "root");
-  const lockDir = path.resolve(
-    outputRoot,
-    ACTIVE_RUNS_DIR,
-    `${suffix}-${hash}`,
-  );
 
   return {
-    claimFilePath: path.join(lockDir, CLAIM_FILE_NAME),
-    lockDir,
+    claimFilePath: path.resolve(outputRoot, ACTIVE_RUNS_DIR, `${hash}.json`),
   };
 }
 
@@ -333,6 +317,19 @@ async function writeClaimRecord(
   );
 }
 
+/** Atomically creates a new claim file so concurrent launches cannot both win. */
+async function writeClaimRecordAtomically(
+  claimFilePath: string,
+  record: ActiveRunClaimRecord,
+): Promise<void> {
+  const handle = await open(claimFilePath, "wx");
+  try {
+    await handle.writeFile(`${JSON.stringify(record, null, 2)}\n`, "utf8");
+  } finally {
+    await handle.close();
+  }
+}
+
 /** Updates the owner pid fields while keeping the original claim identity. */
 async function updateClaimOwner(
   record: ActiveRunClaimRecord,
@@ -403,15 +400,5 @@ function isAlreadyExistsError(error: unknown): error is NodeJS.ErrnoException {
       typeof error === "object" &&
       "code" in error &&
       error.code === "EEXIST",
-  );
-}
-
-/** Produces a filesystem-safe directory segment for the active lock path. */
-function sanitizeSegment(value: string): string {
-  return (
-    value
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "") || "run"
   );
 }

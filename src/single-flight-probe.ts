@@ -194,8 +194,8 @@ async function assertStaleLockIsRecovered(
   const staleResultDir = path.join(outputRoot, staleRunId);
   const staleResultPath = path.join(staleResultDir, "result.json");
 
-  await rm(stalePaths.lockDir, { recursive: true, force: true });
-  await mkdir(stalePaths.lockDir, { recursive: true });
+  await rm(stalePaths.claimFilePath, { force: true });
+  await mkdir(path.dirname(stalePaths.claimFilePath), { recursive: true });
   await mkdir(staleResultDir, { recursive: true });
   await writeFile(
     stalePaths.claimFilePath,
@@ -321,7 +321,7 @@ function buildProbeEnv(mockCodexPath: string): NodeJS.ProcessEnv {
   };
 }
 
-/** Waits until the active-runs directory contains at least one claimed lock. */
+/** Waits until the active-runs directory contains at least one claimed lock file. */
 async function waitForActiveLock(outputRoot: string): Promise<void> {
   const timeoutAt = Date.now() + 4000;
   while (Date.now() < timeoutAt) {
