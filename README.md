@@ -48,16 +48,29 @@ flowchart TD
     O --> P[monitor 按 wrapper 时钟决定是否发 progress]
     P --> Q[reporter 发送运行中通知]
 
-    M --> R[agent 完成或失败]
+    M --> R[agent 完成 / 失败 / cancelled]
     R --> S[生成 agent-summary.txt / agent-report.json]
     S --> T[写最终 result.json / status.json]
-    T --> U[reporter 发送 completion 通知]
+    T --> U[reporter 发送 completion 或 cancelled 通知]
     U --> V[用户查看 Telegram / 当前会话]
+
+    A --> X[查询当前运行情况]
+    X --> X1[node dist/cli.js runs]
+    X --> X2[node dist/cli.js show --run-id <id>]
+    X1 --> X3[查看活跃 run 摘要]
+    X2 --> X4[查看 status.json / result.json]
+
+    A --> Y[中途停止任务]
+    Y --> Y1[node dist/cli.js stop --run-id <id>]
+    Y1 --> Y2[wrapper 优雅停止 child]
+    Y2 --> Y3[最终状态落为 cancelled]
 
     T --> W[后续排查读取 artifacts]
     W --> W1[run.log]
     W --> W2[result.json]
     W --> W3[status.json]
+    W --> W4[agent-summary.txt]
+    W --> W5[agent-report.json]
 ```
 
 ## 当前能力
@@ -76,6 +89,7 @@ flowchart TD
   - `result.json`
   - `status.json`
   - `agent-summary.txt`（若底层 agent 显式输出/写入）
+  - `agent-report.json`（若底层 agent 按约定写出结构化报告）
 - 任务结束后自动通知：
   - 外部聊天渠道优先走 `openclaw message send`
   - session / webchat 场景回退到 `chat.inject`
@@ -151,6 +165,8 @@ skills/coding-assistant/
   }
 }
 ```
+
+这样做的好处是：skill 调用约定、路径、文档和 wrapper 实现可以一起做版本管理，避免 skill 文档和 wrapper 能力逐渐漂移。
 
 注意事项：
 - `skills.load.extraDirs` 的优先级较低；如果你本地已经有同名 `coding-assistant` skill，repo 内这份不会自动覆盖旧版本
@@ -238,6 +254,8 @@ node dist/cli.js run \
 
 ## 参数说明
 
+### `run` 相关参数
+
 - `--agent <codex|claude>`：选择底层代理
 - `--cwd <path>`：任务工作目录
 - `--task <text>`：要执行的任务描述
@@ -246,10 +264,14 @@ node dist/cli.js run \
 - `--progress-start-after-seconds <n>`：首条运行中汇报最早在启动后多少秒允许发送
 - `--progress-every-seconds <n>`：运行中汇报的固定节奏间隔（由 wrapper 自己控制）
 - `--output-root <path>`：结果输出根目录，默认是当前命令目录下的 `runs`
+- `-- ...`：透传给底层代理命令的额外参数
+
+### 子命令
+
+- `run`：启动一个新的 wrapper 任务
 - `stop --run-id <id>`：请求优雅停止一个后台 run，成功时最终状态会落成 `cancelled`
 - `runs`：列出当前活跃 run 的简要信息
 - `show --run-id <id>`：查看某个 run 的 `status.json` / `result.json` 摘要
-- `-- ...`：透传给底层代理命令的额外参数
 
 ## 结果文件位置
 
@@ -259,6 +281,8 @@ node dist/cli.js run \
 runs/<runId>/run.log
 runs/<runId>/result.json
 runs/<runId>/status.json
+runs/<runId>/agent-summary.txt
+runs/<runId>/agent-report.json
 ```
 
 其中 `result.json` 至少包含：
@@ -283,11 +307,14 @@ runs/<runId>/status.json
 - `reporting.lastReportAt`
 - `reporting.reportCount`
 
-最终 `result.json` 仍是任务结束后的权威结果文件，其中运行中的 ownership 字段包括：
+最终 `result.json` 仍是任务结束后的权威结果文件，其中运行中的 ownership / control 字段包括：
 
-- `pid`
+- `pid`：wrapper 进程 pid
+- `childPid`：底层 Codex / Claude 子进程 pid
 - `claimedAt`
 - `terminationReason`
+- `stopRequestedAt`
+- `stopRequestedBy`
 
 ## Stop / cancel 语义
 

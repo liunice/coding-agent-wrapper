@@ -145,6 +145,13 @@ After the stop completes:
 - ask the user whether to keep those changes or discard/revert them
 - do not silently remove modified source files without user confirmation
 
+Minimal git checks after interruption:
+
+```bash
+git status --short
+git diff --stat
+```
+
 ## Safety notes
 
 - Do not launch coding assistants inside `~/.openclaw` unless explicitly requested

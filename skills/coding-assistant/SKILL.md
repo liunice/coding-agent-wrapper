@@ -1,16 +1,17 @@
 ---
 name: coding-assistant
-description: Run Codex or Claude Code as a managed background coding assistant with structured result artifacts and completion notifications. Use when building features, refactoring code, fixing bugs, reviewing implementation plans, or running iterative coding work in a real project directory. Prefer this instead of the older coding-agent skill when you want detached execution, `result.json` / `run.log` artifacts, and automatic completion notifications back to Telegram or the current session. Do not use for tiny one-line edits, simple file reads, or thread-bound ACP harness requests in chat.
+description: Run Codex or Claude Code as a managed background coding assistant with structured run artifacts, optional in-progress notifications, run status inspection, and graceful cancellation. Use when building features, refactoring code, fixing bugs, reviewing implementation plans, or running iterative coding work in a real project directory. Prefer this instead of the older coding-agent skill when you want detached execution, `result.json` / `run.log` / `status.json` artifacts, active run lookup, and completion or cancellation notifications back to Telegram or the current session. Do not use for tiny one-line edits, simple file reads, or thread-bound ACP harness requests in chat.
 ---
 
 # Coding Assistant
 
-Use the local `coding-agent-wrapper` project as the default execution layer for Codex / Claude Code coding tasks. The wrapper is the new preferred path because it gives you four things the old bash-first flow did not provide reliably:
+Use the local `coding-agent-wrapper` project as the default execution layer for Codex / Claude Code coding tasks. The wrapper is the new preferred path because it gives you five things the old bash-first flow did not provide reliably:
 
 1. detached background execution
-2. stable run artifacts (`run.log`, `result.json`, `status.json`, optional `agent-summary.txt`)
+2. stable run artifacts (`run.log`, `result.json`, `status.json`, optional `agent-summary.txt`, optional `agent-report.json`)
 3. automatic completion notifications
 4. optional in-progress notifications with cadence controlled by the wrapper itself
+5. queryable active runs plus graceful cancellation
 
 ## Default decision
 
@@ -154,6 +155,7 @@ Do not spam progress updates. Only send another update when:
 When the user says things like “停掉”, “取消这个任务”, “别跑了”, or otherwise asks to stop an active wrapper run:
 
 - prefer the wrapper's formal stop path (do not treat this as an abnormal crash)
+- if the target run is ambiguous, first inspect active runs with `runs` / `show --run-id`
 - stop the run by `runId` when possible
 - after stopping, report whether the run ended as `cancelled`, whether stop required escalation, and where the artifacts are
 
@@ -174,6 +176,7 @@ runs/<runId>/run.log
 runs/<runId>/result.json
 runs/<runId>/status.json
 runs/<runId>/agent-summary.txt
+runs/<runId>/agent-report.json
 ```
 
 Use them like this:
@@ -181,6 +184,7 @@ Use them like this:
 - `result.json`: structured final result, timestamps, summary, modified files
 - `status.json`: running-state snapshot used for in-progress reporting
 - `agent-summary.txt`: human-friendly summary left by the coding agent when available
+- `agent-report.json`: structured report emitted by the coding agent when available
 
 When the user asks "还在跑吗？", check `status.json` and `result.json` first, then tail `run.log` if needed.
 
