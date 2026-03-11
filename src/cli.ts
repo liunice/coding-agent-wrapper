@@ -10,6 +10,7 @@ import process from "node:process";
 import { listActiveRuns, showRun } from "./query";
 import { createRunContext, executeRun, launchDetached } from "./runner";
 import { stopRun } from "./stop";
+import { tailRunLog } from "./tail";
 import type {
   CliOptions,
   RunCliOptions,
@@ -17,6 +18,7 @@ import type {
   ShowCliOptions,
   StopCliOptions,
   SupportedAgent,
+  TailCliOptions,
 } from "./types";
 
 /** Supported agent names accepted by the CLI. */
@@ -47,6 +49,11 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (options.command === "tail") {
+    process.exitCode = await tailRunLog(options);
+    return;
+  }
+
   const context = await createRunContext(options);
 
   if (options.detach && !options.internalRun) {
@@ -74,14 +81,15 @@ async function main(): Promise<void> {
 function parseCliArgs(argv: string[]): CliOptions | null {
   const args = [...argv];
 
-  let command: "run" | "stop" | "runs" | "show" = "run";
+  let command: "run" | "stop" | "runs" | "show" | "tail" = "run";
   if (
     args[0] === "run" ||
     args[0] === "stop" ||
     args[0] === "runs" ||
-    args[0] === "show"
+    args[0] === "show" ||
+    args[0] === "tail"
   ) {
-    command = args[0] as "run" | "stop" | "runs" | "show";
+    command = args[0] as "run" | "stop" | "runs" | "show" | "tail";
     args.shift();
   }
 
@@ -107,6 +115,8 @@ function parseCliArgs(argv: string[]): CliOptions | null {
   let notifyAccount: string | undefined;
   let notifyReplyTo: string | undefined;
   let notifyThreadId: string | undefined;
+  let tailLines = 10;
+  let follow = false;
   const passthroughArgs: string[] = [];
 
   for (let index = 0; index < args.length; index += 1) {
@@ -188,6 +198,20 @@ function parseCliArgs(argv: string[]): CliOptions | null {
       case "--notify-thread-id":
         notifyThreadId = readRequiredValue(value, args[++index]);
         break;
+      case "-n":
+      case "--lines":
+        tailLines = Number.parseInt(
+          readRequiredValue(value, args[++index]),
+          10,
+        );
+        if (!Number.isFinite(tailLines) || tailLines <= 0) {
+          throw new Error("--lines must be a positive integer");
+        }
+        break;
+      case "-f":
+      case "--follow":
+        follow = true;
+        break;
       case "--detach":
         detach = true;
         break;
@@ -195,6 +219,10 @@ function parseCliArgs(argv: string[]): CliOptions | null {
         internalRun = true;
         break;
       default:
+        if (command === "tail" && !runId && !value.startsWith("-")) {
+          runId = value;
+          break;
+        }
         throw new Error(`Unknown argument: ${value}`);
     }
   }
@@ -203,7 +231,10 @@ function parseCliArgs(argv: string[]): CliOptions | null {
     return null;
   }
 
-  if ((command === "stop" || command === "show") && !runId) {
+  if (
+    (command === "stop" || command === "show" || command === "tail") &&
+    !runId
+  ) {
     return null;
   }
 
@@ -293,6 +324,35 @@ function parseCliArgs(argv: string[]): CliOptions | null {
     return options;
   }
 
+  if (command === "tail") {
+    if (!runId) {
+      return null;
+    }
+
+    const options: TailCliOptions = {
+      command,
+      runId,
+      lines: tailLines,
+      follow,
+      label,
+      detach,
+      outputRoot,
+      internalRun,
+      startedAt,
+      progressEverySeconds,
+      progressStartAfterSeconds,
+      resumeMode,
+      notifySessionKey,
+      notifyChannel,
+      notifyTarget,
+      notifyAccount,
+      notifyReplyTo,
+      notifyThreadId,
+      passthroughArgs,
+    };
+    return options;
+  }
+
   if (!agent || !cwd || !task) {
     return null;
   }
@@ -342,7 +402,7 @@ function readRequiredValue(flag: string, value: string | undefined): string {
 /** Prints the short usage guide for the wrapper CLI. */
 function printUsage(): void {
   process.stdout.write(
-    "coding-agent-wrapper\n\nUsage:\n  node dist/cli.js run --agent <codex|claude> --cwd <path> --task <text> [--label <text>] [--detach] [--new-session] [--progress-every-seconds <n>] [--progress-start-after-seconds <n>] [--output-root <path>] [--notify-session-key <key>] [--notify-channel <name> --notify-target <id> [--notify-account <id>] [--notify-reply-to <id>] [--notify-thread-id <id>]] [-- ...passthrough]\n  node dist/cli.js stop --run-id <id> [--output-root <path>]\n  node dist/cli.js runs [--output-root <path>]\n  node dist/cli.js show --run-id <id> [--output-root <path>]\n",
+    "coding-agent-wrapper\n\nUsage:\n  node dist/cli.js run --agent <codex|claude> --cwd <path> --task <text> [--label <text>] [--detach] [--new-session] [--progress-every-seconds <n>] [--progress-start-after-seconds <n>] [--output-root <path>] [--notify-session-key <key>] [--notify-channel <name> --notify-target <id> [--notify-account <id>] [--notify-reply-to <id>] [--notify-thread-id <id>]] [-- ...passthrough]\n  node dist/cli.js stop --run-id <id> [--output-root <path>]\n  node dist/cli.js runs [--output-root <path>]\n  node dist/cli.js show --run-id <id> [--output-root <path>]\n  node dist/cli.js tail <run-id> [-n <count>] [-f] [--output-root <path>]\n",
   );
 }
 

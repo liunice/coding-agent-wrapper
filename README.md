@@ -224,6 +224,14 @@ node dist/cli.js show \
   --run-id 20260311093830-stop-probe-v2
 ```
 
+查看某个 run 的日志尾部：
+
+```bash
+node dist/cli.js tail 20260311093830-stop-probe-v2
+node dist/cli.js tail 20260311093830-stop-probe-v2 -n 30
+node dist/cli.js tail 20260311093830-stop-probe-v2 -f
+```
+
 也支持给底层代理透传额外参数，在 `--` 后面填写：
 
 ```bash
@@ -262,6 +270,7 @@ node dist/cli.js run \
 - `stop --run-id <id>`：请求优雅停止一个后台 run，成功时最终状态会落成 `cancelled`
 - `runs`：列出当前活跃 run 的简要信息
 - `show --run-id <id>`：查看某个 run 的 `status.json` / `result.json` 摘要
+- `tail <run-id> [-n <count>] [-f]`：查看某个 run 的 `run.log` 尾部，支持限定行数与 follow
 
 ## 结果文件与运行状态
 

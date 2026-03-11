@@ -217,7 +217,10 @@ async function readRecentMeaningfulActivity(
       return null;
     }
 
-    return lines.slice(-3).map((line) => truncateForDisplay(line, 160)).join("\n");
+    return lines
+      .slice(-3)
+      .map((line) => truncateForDisplay(line, 160))
+      .join("\n");
   } catch {
     return null;
   } finally {

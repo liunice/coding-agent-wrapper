@@ -18,7 +18,7 @@ export type RunPhase =
 
 /** Describes CLI options shared by run/stop commands. */
 interface BaseCliOptions {
-  command: "run" | "stop" | "runs" | "show";
+  command: "run" | "stop" | "runs" | "show" | "tail";
   label?: string;
   detach: boolean;
   outputRoot: string;
@@ -58,12 +58,20 @@ export interface ShowCliOptions extends BaseCliOptions {
   runId: string;
 }
 
+export interface TailCliOptions extends BaseCliOptions {
+  command: "tail";
+  runId: string;
+  lines: number;
+  follow: boolean;
+}
+
 /** Describes CLI options after parsing and normalization. */
 export type CliOptions =
   | RunCliOptions
   | StopCliOptions
   | RunsCliOptions
-  | ShowCliOptions;
+  | ShowCliOptions
+  | TailCliOptions;
 
 /** Describes the launch shape that each agent adapter must provide. */
 export interface AgentLaunchSpec {

@@ -212,7 +212,15 @@ Use them like this:
 - `agent-summary.txt`: human-friendly summary left by the coding agent when available
 - `agent-report.json`: structured report emitted by the coding agent when available
 
-When the user asks "is it still running?", check `status.json` and `result.json` first, then tail `run.log` if needed.
+When the user asks "is it still running?", check `status.json` and `result.json` first, then prefer the wrapper tail command if you need recent log output:
+
+```bash
+node dist/cli.js tail <run-id>
+node dist/cli.js tail <run-id> -n 30
+node dist/cli.js tail <run-id> -f
+```
+
+Do not default to hand-building `runs/<runId>/run.log` paths plus system `tail` when the wrapper command is available.
 
 ## Result contract
 
