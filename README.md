@@ -116,6 +116,54 @@ pnpm build
 
 也可以直接在仓库内通过 `pnpm exec` 运行编译后的 CLI。
 
+## 在 OpenClaw 中启用 repo 内置 skill
+
+本仓库现在内置了一个与 wrapper 同步维护的 `coding-assistant` skill，目录位于：
+
+```text
+skills/coding-assistant/
+```
+
+如果你希望 OpenClaw 直接从这个仓库加载该 skill，需要在 `openclaw.json` 中加入额外的 skill 加载目录：
+
+```json
+{
+  "skills": {
+    "load": {
+      "extraDirs": [
+        "/path/to/coding-agent-wrapper/skills"
+      ]
+    }
+  }
+}
+```
+
+本机示例：
+
+```json
+{
+  "skills": {
+    "load": {
+      "extraDirs": [
+        "/var/services/homes/liunice/projects/coding-agent-wrapper/skills"
+      ]
+    }
+  }
+}
+```
+
+注意事项：
+- `skills.load.extraDirs` 的优先级较低；如果你本地已经有同名 `coding-assistant` skill，repo 内这份不会自动覆盖旧版本
+- 因此迁移时，最好先移走、停用或重命名旧的同名 skill，再启用本仓库内置版本
+- 启用后可用 `openclaw skills list` 检查 `coding-assistant` 是否来自 `openclaw-extra`
+- 本仓库内 skill 的命令示例默认假设你在 **wrapper repo root** 下执行，因此推荐使用：
+
+```bash
+node dist/cli.js ...
+```
+
+而不是把绝对路径硬编码到每条命令里。
+
 ## 用法
 
 先编译：
@@ -295,4 +343,3 @@ pnpm lint
 
 - 增加更多 agent 适配器
 - 增加结果 JSON 的更强结构化字段
-- 增加任务列表与最近运行查询
