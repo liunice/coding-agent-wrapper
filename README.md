@@ -165,6 +165,19 @@ node dist/cli.js stop \
   --run-id 20260311093830-stop-probe-v2
 ```
 
+查看当前活跃 run：
+
+```bash
+node dist/cli.js runs
+```
+
+查看单个 run 的状态与结果：
+
+```bash
+node dist/cli.js show \
+  --run-id 20260311093830-stop-probe-v2
+```
+
 也支持给底层代理透传额外参数，在 `--` 后面填写：
 
 ```bash
@@ -186,6 +199,8 @@ node dist/cli.js run \
 - `--progress-every-seconds <n>`：运行中汇报的固定节奏间隔（由 wrapper 自己控制）
 - `--output-root <path>`：结果输出根目录，默认是当前命令目录下的 `runs`
 - `stop --run-id <id>`：请求优雅停止一个后台 run，成功时最终状态会落成 `cancelled`
+- `runs`：列出当前活跃 run 的简要信息
+- `show --run-id <id>`：查看某个 run 的 `status.json` / `result.json` 摘要
 - `-- ...`：透传给底层代理命令的额外参数
 
 ## 结果文件位置

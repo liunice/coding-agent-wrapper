@@ -7,11 +7,14 @@
 import path from "node:path";
 import process from "node:process";
 
+import { listActiveRuns, showRun } from "./query";
 import { createRunContext, executeRun, launchDetached } from "./runner";
 import { stopRun } from "./stop";
 import type {
   CliOptions,
   RunCliOptions,
+  RunsCliOptions,
+  ShowCliOptions,
   StopCliOptions,
   SupportedAgent,
 } from "./types";
@@ -31,6 +34,16 @@ async function main(): Promise<void> {
 
   if (options.command === "stop") {
     process.exitCode = await stopRun(options);
+    return;
+  }
+
+  if (options.command === "runs") {
+    process.exitCode = await listActiveRuns(options);
+    return;
+  }
+
+  if (options.command === "show") {
+    process.exitCode = await showRun(options);
     return;
   }
 
@@ -61,13 +74,18 @@ async function main(): Promise<void> {
 function parseCliArgs(argv: string[]): CliOptions | null {
   const args = [...argv];
 
-  let command: "run" | "stop" = "run";
-  if (args[0] === "run" || args[0] === "stop") {
-    command = args[0] as "run" | "stop";
+  let command: "run" | "stop" | "runs" | "show" = "run";
+  if (
+    args[0] === "run" ||
+    args[0] === "stop" ||
+    args[0] === "runs" ||
+    args[0] === "show"
+  ) {
+    command = args[0] as "run" | "stop" | "runs" | "show";
     args.shift();
   }
 
-  if (args.length === 0 || args.includes("--help") || args.includes("-h")) {
+  if (args.includes("--help") || args.includes("-h")) {
     return null;
   }
 
@@ -185,7 +203,7 @@ function parseCliArgs(argv: string[]): CliOptions | null {
     return null;
   }
 
-  if (command === "stop" && !runId) {
+  if ((command === "stop" || command === "show") && !runId) {
     return null;
   }
 
@@ -204,6 +222,56 @@ function parseCliArgs(argv: string[]): CliOptions | null {
     }
 
     const options: StopCliOptions = {
+      command,
+      runId,
+      label,
+      detach,
+      outputRoot,
+      internalRun,
+      startedAt,
+      progressEverySeconds,
+      progressStartAfterSeconds,
+      resumeMode,
+      notifySessionKey,
+      notifyChannel,
+      notifyTarget,
+      notifyAccount,
+      notifyReplyTo,
+      notifyThreadId,
+      passthroughArgs,
+    };
+    return options;
+  }
+
+  if (command === "runs") {
+    const options: RunsCliOptions = {
+      command,
+      label,
+      detach,
+      outputRoot,
+      internalRun,
+      runId,
+      startedAt,
+      progressEverySeconds,
+      progressStartAfterSeconds,
+      resumeMode,
+      notifySessionKey,
+      notifyChannel,
+      notifyTarget,
+      notifyAccount,
+      notifyReplyTo,
+      notifyThreadId,
+      passthroughArgs,
+    };
+    return options;
+  }
+
+  if (command === "show") {
+    if (!runId) {
+      return null;
+    }
+
+    const options: ShowCliOptions = {
       command,
       runId,
       label,
@@ -274,7 +342,7 @@ function readRequiredValue(flag: string, value: string | undefined): string {
 /** Prints the short usage guide for the wrapper CLI. */
 function printUsage(): void {
   process.stdout.write(
-    "coding-agent-wrapper\n\nUsage:\n  node dist/cli.js run --agent <codex|claude> --cwd <path> --task <text> [--label <text>] [--detach] [--new-session] [--progress-every-seconds <n>] [--progress-start-after-seconds <n>] [--output-root <path>] [--notify-session-key <key>] [--notify-channel <name> --notify-target <id> [--notify-account <id>] [--notify-reply-to <id>] [--notify-thread-id <id>]] [-- ...passthrough]\n  node dist/cli.js stop --run-id <id> [--output-root <path>]\n",
+    "coding-agent-wrapper\n\nUsage:\n  node dist/cli.js run --agent <codex|claude> --cwd <path> --task <text> [--label <text>] [--detach] [--new-session] [--progress-every-seconds <n>] [--progress-start-after-seconds <n>] [--output-root <path>] [--notify-session-key <key>] [--notify-channel <name> --notify-target <id> [--notify-account <id>] [--notify-reply-to <id>] [--notify-thread-id <id>]] [-- ...passthrough]\n  node dist/cli.js stop --run-id <id> [--output-root <path>]\n  node dist/cli.js runs [--output-root <path>]\n  node dist/cli.js show --run-id <id> [--output-root <path>]\n",
   );
 }
 
