@@ -41,7 +41,7 @@
 flowchart TD
     A[OpenClaw 主会话 / 用户请求] --> B[coding-assistant skill]
     B --> C{是否适合用 wrapper?}
-    C -->|是| D[组装任务 / 选择通知策略]
+    C -->|是| D[组装任务 / 同时收集 channel + session 路由]
     C -->|否| Z[改走直接手改或其他路径]
 
     D --> E[node dist/cli.js run ... --detach]
@@ -59,12 +59,12 @@ flowchart TD
     M --> N[流式写 run.log]
     N --> O[提取 sessionId / 更新 status.json]
     O --> P[monitor 按 wrapper 时钟决定是否发 progress]
-    P --> Q[reporter 发送运行中通知]
+    P --> Q[reporter: message send 优先 / 再补 chat.inject]
 
     M --> R[agent 完成 / 失败 / cancelled]
     R --> S[生成 agent-summary.txt / agent-report.json]
     S --> T[写最终 result.json / status.json]
-    T --> U[reporter 发送 completion 或 cancelled 通知]
+    T --> U[reporter: completion 或 cancelled 先发 provider 再补 session]
     U --> V[用户查看 Telegram / 当前会话]
 
     A --> X[查询当前运行情况]
@@ -233,6 +233,14 @@ node dist/cli.js run \
   --task "Add a small README section." \
   -- --model gpt-5-codex
 ```
+
+### 通知路由策略
+
+- 如果提供了 `notifyChannel + notifyTarget`，wrapper 会先执行 `message send`
+- 如果同时还提供了 `notifySessionKey`，wrapper 会在 `message send` 之后再执行一次 `chat.inject`
+- 这两个动作不会互相短路：即使 provider/channel 消息已发送成功，session 注入仍会继续尝试；反过来也一样
+- 这样做是为了避免 Telegram / Discord / WhatsApp 与 webchat 同时打开时，只把完成消息注入到 session、却漏发到真实消息渠道
+- `run.log` 会记录每一步的尝试顺序、单步 exit code / success，以及最终是否至少有一种通知成功
 
 ### CLI 参考
 

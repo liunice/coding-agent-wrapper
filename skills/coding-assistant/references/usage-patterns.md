@@ -5,6 +5,7 @@
 Use when the current conversation is a real messaging channel.
 Prefer wrapper defaults from `openclaw.json -> skills.entries.coding-assistant.env` via `NOTIFY_*`.
 Only pass explicit routing flags when the defaults are unavailable or you need to override them.
+If you have both provider routing info and the current session key, pass both so the wrapper can send the provider message first and then supplement it with session injection.
 
 Short/normal task without in-progress notifications:
 
@@ -15,6 +16,10 @@ node dist/cli.js run \
   --cwd /path/to/project \
   --label short-label \
   --task "Implement X. Validate with Y. Write a concise completion summary to agent-summary.txt." \
+  --notify-channel telegram \
+  --notify-target <chat-or-user-id> \
+  --notify-account <account-if-needed> \
+  --notify-reply-to <replyTo-if-available> \
   --notify-session-key <session-key-if-available> \
   --detach
 ```
@@ -28,6 +33,10 @@ node dist/cli.js run \
   --cwd /path/to/project \
   --label short-label \
   --task "Implement X. Validate with Y. Write a concise completion summary to agent-summary.txt." \
+  --notify-channel telegram \
+  --notify-target <chat-or-user-id> \
+  --notify-account <account-if-needed> \
+  --notify-reply-to <replyTo-if-available> \
   --notify-session-key <session-key-if-available> \
   --progress-start-after-seconds 120 \
   --progress-every-seconds 180 \

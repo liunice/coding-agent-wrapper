@@ -57,7 +57,9 @@ Use the wrapper's hybrid notify contract.
   prefer explicit notify routing, or configure defaults in `openclaw.json -> skills.entries.coding-assistant.env` via `NOTIFY_*`
 - **webchat / Control UI / session-only contexts**:
   pass `--notify-session-key <current session key>`
-- If you have both explicit target info and session key, pass both; when `--notify-session-key` is explicitly provided, the wrapper now prefers session delivery first and only falls back to channel delivery if session injection fails
+- If you have both explicit target info and session key, pass both; the wrapper will send provider/channel delivery first and then also inject the same message into the session
+- In Telegram / Discord / WhatsApp and similar provider contexts, pass `--notify-channel`, `--notify-target`, `--notify-account` when available; if you also have `sessionKey`, pass `--notify-session-key` too
+- If `notifyReplyTo` is available from the source message, pass it as well so completion messages stay threaded when the provider supports reply routing
 - Do not hardcode bot tokens, Telegram ids, or account ids in the skill itself; keep them in OpenClaw config
 
 ### 3. Shape the task prompt
@@ -123,11 +125,15 @@ node dist/cli.js run \
   --cwd /path/to/project \
   --label short-task-name \
   --task "...full task prompt..." \
+  --notify-channel telegram \
+  --notify-target <chat-or-user-id> \
+  --notify-account <account-if-needed> \
+  --notify-reply-to <replyTo-if-available> \
   --notify-session-key <sessionKey-if-available> \
   --detach
 ```
 
-If the current channel needs explicit provider delivery and no wrapper defaults are configured yet, add the needed `--notify-channel / --notify-target / --notify-account` flags at launch time.
+If the current channel needs explicit provider delivery and no wrapper defaults are configured yet, add the needed `--notify-channel / --notify-target / --notify-account` flags at launch time. If a current session key is also available, keep passing it so the wrapper can supplement provider delivery with `chat.inject`.
 
 Notes:
 - `--detach` is the default for long coding work
