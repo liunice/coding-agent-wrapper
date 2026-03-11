@@ -60,8 +60,6 @@ Recommended inputs:
   - `--notify-account`
 - if the source message provides a reply anchor, pass `--notify-reply-to` so completion messages can stay attached to the triggering message when supported
 - if a current OpenClaw session key is available, also pass `--notify-session-key`
-- for default routing, prefer configuring `NOTIFY_*` values in `openclaw.json -> skills.entries.coding-assistant.env`
-- do not hardcode bot tokens, Telegram ids, or account ids in the skill itself; keep them in OpenClaw config
 
 ### 3. Shape the task prompt
 
@@ -155,7 +153,7 @@ node dist/cli.js run \
   --detach
 ```
 
-If the current channel needs explicit provider delivery and no wrapper defaults are configured yet, add the needed `--notify-channel / --notify-target / --notify-account` flags at launch time. If a current session key is also available, pass `--notify-session-key` too.
+When provider delivery details are available, pass the needed `--notify-channel / --notify-target / --notify-account` flags at launch time. If a current session key is also available, pass `--notify-session-key` too.
 
 Notes:
 - `--detach` is the default for long coding work
