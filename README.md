@@ -1,26 +1,55 @@
 # coding-agent-wrapper
 
-一个尽量小、可运行、可扩展的通用 coding agent wrapper。第一版目标不是做服务平台，而是提供一个统一 CLI，把不同编程代理包装成一致的“后台任务执行单元”，统一处理：
+一个面向开发者的、可组合的 coding agent wrapper：把 Codex / Claude Code 这类编程代理包装成统一的后台任务执行单元，并提供一致的运行时产物、进度汇报、查询与中断控制能力。
 
-- 启动参数
-- 后台运行
-- 日志落盘
-- 结果 JSON 落盘
-- 完成通知
+它既可以：
+- 被 **OpenClaw skill** 调用，作为聊天中的后台 coding 执行层
+- 也可以被开发者 **直接通过 CLI** 调用，用在本地脚本、自动化流程或自定义编排器中
 
-当前第一版优先把 `Codex` 支持做好，同时给 `Claude Code` 留出清晰适配位。
+当前版本重点做好：
+- detached 后台运行
+- 统一 artifact 输出（`run.log` / `result.json` / `status.json`）
+- 运行中 progress 通知
+- active run 查询
+- graceful stop / cancel
 
-## 为什么它服务于“模式 B”
+## 适用场景
 
-这里将“模式 B”具体化为一种简单工作模式：
+适合以下场景：
+- 你希望把长时间运行的 coding 任务放到后台执行，而不是一直占住当前终端/会话
+- 你希望运行过程中有可观察的进度，而不是只在最后看结果
+- 你希望任务结束后有结构化结果文件，而不是只靠控制台滚动日志
+- 你希望可以查询当前有哪些 run 在执行，必要时中途优雅停止
+- 你在做 OpenClaw 集成，希望 skill、wrapper 和文档一起版本管理
 
-- 人或上层脚本发起一次编码任务
-- 任务在后台持续运行，不要求人一直盯着终端
-- 任务过程写日志，结果写结构化 JSON
-- 完成后只通过轻量通知唤醒人
-- 细节查看走日志和结果文件，而不是把通知通道塞满
+不适合的场景：
+- 只做一两行特别简单的本地改动
+- 不需要后台运行、不需要结果落盘、不需要通知的短命令
+- 你已经有一套更高层、协议化的任务调度/执行系统，并不需要这个中间层
 
-这个仓库的第一版正是围绕这组需求设计：通知通道与结果通道分离，适合作为更大自动化流程中的一个基础执行块。
+## 核心能力
+
+- 统一 CLI 参数：`agent`、`cwd`、`task`、`label`
+- 支持 `--detach` 后台运行
+- 支持 `codex` 适配
+- 支持 `claude` 适配骨架
+- 自动写入运行产物：
+  - `run.log`
+  - `result.json`
+  - `status.json`
+  - `agent-summary.txt`（若底层 agent 显式输出/写入）
+  - `agent-report.json`（若底层 agent 按约定写出结构化报告）
+- 支持可选的运行中进度通知：
+  - cadence 由 wrapper 自己控制
+  - 可通过 `--progress-start-after-seconds` 与 `--progress-every-seconds` 控制
+- 支持 active run 查询：
+  - `runs`
+  - `show --run-id <id>`
+- 支持 graceful cancellation：
+  - `stop --run-id <id>`
+  - 最终状态为 `cancelled`，而不是误记为 `failed`
+- 默认支持按 `agent + cwd` 复用最近一次 session id
+- 默认对同一项目目录启用 single-flight（同一 `cwd` 同时只允许一个活跃 run）
 
 ## 运行流程图
 
@@ -73,54 +102,6 @@ flowchart TD
     W --> W5[agent-report.json]
 ```
 
-## 当前能力
-
-- 支持统一 CLI 参数：`agent`、`cwd`、`task`、`label`
-- 支持 `--detach` 后台运行
-- 支持 `codex` 适配
-  - `CODEX_API_KEY` 从运行环境或 `openclaw.json -> skills.entries.coding-assistant.env` 读取
-  - 默认附加 `--dangerously-bypass-approvals-and-sandbox`
-- 支持 `claude` 适配骨架
-  - 已实现命令拼装
-  - 已实现运行、日志、结果落盘流程
-  - 第一版主要定位为结构预留与本机命令接入点
-- 自动写入：
-  - `run.log`
-  - `result.json`
-  - `status.json`
-  - `agent-summary.txt`（若底层 agent 显式输出/写入）
-  - `agent-report.json`（若底层 agent 按约定写出结构化报告）
-- 任务结束后自动通知：
-  - 外部聊天渠道优先走 `openclaw message send`
-  - session / webchat 场景回退到 `chat.inject`
-  - 默认通知路由可从 `openclaw.json -> skills.entries.coding-assistant.env` 中的 `NOTIFY_*` 环境变量读取
-- 支持可选的运行中进度通知：
-  - 由 wrapper 自己的时钟控制汇报节奏
-  - 可通过 `--progress-start-after-seconds` 与 `--progress-every-seconds` 控制
-  - 适合明确长任务，不建议对所有短任务默认开启
-- 完成通知与 `result.json` 会尽量包含：
-  - 开始时间 / 完成时间 / 耗时(分钟)
-  - `【任务目标】` 与 `【任务总结】` 两个独立区块
-  - 验证摘要
-  - session id / resume 来源 / commit id
-  - 修改文件清单
-  - 备注
-  - 状态码
-- wrapper 现在会要求 agent 额外写出 `agent-report.json`，优先从结构化字段读取：
-  - `taskSummary`
-  - `modifiedFiles`（兼容字段）
-  - `projectModifiedFiles`
-  - `artifactFiles`
-  - `validation`
-  - `validationSummary`
-  - `notes`
-  - `commitId`
-- 用户通知里的 `【修改文件】` 默认只展示项目改动；wrapper 产物（如 `agent-summary.txt` / `agent-report.json`）会单独归类到 `artifactFiles`
-- 默认会按 `agent + cwd` 记录并复用最近一次 session id；只有显式传 `--new-session` 时才禁用 resume
-- session id 现在会先在子进程 `stdout/stderr` 流式输出阶段实时提取并缓存；若仍未识别，进程结束后会再扫描完整 `run.log` 做兜底，避免长日志截断导致丢失 session id
-- 默认对同一个 `cwd` 启用 same-project single-flight：同一项目目录同时只允许一个活跃 run，不区分 `codex` / `claude`；新 run 会在 `runs/active-runs/<cwd-hash>.json` 上先尝试原子 claim 单文件 lock
-- stale recovery 以 active lock + `result.json` 运行态组合判断：优先检查 `pid` 是否仍存活、Linux 下 `/proc/<pid>/stat` 启动时钟是否匹配，以及 `result.json` 是否已经结束；不会仅凭 heartbeat / 日志静默时间驱逐
-
 ## 安装
 
 ```bash
@@ -132,7 +113,7 @@ pnpm build
 
 ## 在 OpenClaw 中启用 repo 内置 skill
 
-本仓库现在内置了一个与 wrapper 同步维护的 `coding-assistant` skill，目录位于：
+本仓库内置了一个与 wrapper 同步维护的 `coding-assistant` skill，目录位于：
 
 ```text
 skills/coding-assistant/
@@ -152,14 +133,30 @@ skills/coding-assistant/
 }
 ```
 
-本机示例：
+同时，通常还需要在 `openclaw.json -> skills.entries.coding-assistant.env` 中配置这个 skill 运行所需的环境变量。常见用途包括：
+
+- coding agent 自身需要的环境变量（例如 Codex / Claude Code 所需配置）
+- wrapper 的通知目标配置（例如默认通知 channel / target / account）
+
+一个通用示意如下：
 
 ```json
 {
   "skills": {
+    "entries": {
+      "coding-assistant": {
+        "env": {
+          "SOME_AGENT_ENV": "value",
+          "ANOTHER_AGENT_ENV": "value",
+          "NOTIFY_CHANNEL": "telegram",
+          "NOTIFY_TARGET": "<chat-or-user-id>",
+          "NOTIFY_ACCOUNT_ID": "default"
+        }
+      }
+    },
     "load": {
       "extraDirs": [
-        "/var/services/homes/liunice/projects/coding-agent-wrapper/skills"
+        "/path/to/coding-agent-wrapper/skills"
       ]
     }
   }
@@ -180,13 +177,28 @@ node dist/cli.js ...
 
 而不是把绝对路径硬编码到每条命令里。
 
-## 用法
+## 使用方式
 
-先编译：
+这个项目有两种主要使用方式：
 
-```bash
-pnpm build
-```
+### 方式 A：通过 OpenClaw skill 使用
+
+如果你在 OpenClaw 中启用了 repo 内置 `coding-assistant` skill，那么上层 agent 可以直接通过 skill 来：
+- 启动后台 coding 任务
+- 决定是否开启 progress notifications
+- 查询活跃 run
+- 中途停止任务
+- 在任务被中断后检查 git 工作区并询问用户是否保留改动
+
+这种方式适合：
+- 聊天驱动的任务执行
+- 希望复用 skill 中已定义好的策略（progress cadence、stop 后 git 检查等）
+
+### 方式 B：直接通过 CLI 使用
+
+如果你不通过 OpenClaw skill，也可以直接调用 wrapper CLI。
+
+#### 常见命令
 
 前台运行一个 Codex 任务：
 
@@ -252,9 +264,9 @@ node dist/cli.js run \
   -- --model gpt-5-codex
 ```
 
-## 参数说明
+### CLI 参考
 
-### `run` 相关参数
+#### `run` 相关参数
 
 - `--agent <codex|claude>`：选择底层代理
 - `--cwd <path>`：任务工作目录
@@ -266,14 +278,14 @@ node dist/cli.js run \
 - `--output-root <path>`：结果输出根目录，默认是当前命令目录下的 `runs`
 - `-- ...`：透传给底层代理命令的额外参数
 
-### 子命令
+#### 子命令
 
 - `run`：启动一个新的 wrapper 任务
 - `stop --run-id <id>`：请求优雅停止一个后台 run，成功时最终状态会落成 `cancelled`
 - `runs`：列出当前活跃 run 的简要信息
 - `show --run-id <id>`：查看某个 run 的 `status.json` / `result.json` 摘要
 
-## 结果文件位置
+## 结果文件与运行状态
 
 默认输出到：
 
@@ -285,7 +297,9 @@ runs/<runId>/agent-summary.txt
 runs/<runId>/agent-report.json
 ```
 
-其中 `result.json` 至少包含：
+### `result.json`
+
+`result.json` 是任务结束后的权威结果文件，至少包含：
 
 - `runId`
 - `agent`
@@ -298,16 +312,7 @@ runs/<runId>/agent-report.json
 - `logPath`
 - `summary`
 
-当前还会额外写出运行中状态快照 `status.json`，用于进度播报与运行态检查，包含如下一类字段：
-
-- `phase`
-- `summary`
-- `updatedAt`
-- `sessionId`
-- `reporting.lastReportAt`
-- `reporting.reportCount`
-
-最终 `result.json` 仍是任务结束后的权威结果文件，其中运行中的 ownership / control 字段包括：
+此外，运行中的 ownership / control 相关字段包括：
 
 - `pid`：wrapper 进程 pid
 - `childPid`：底层 Codex / Claude 子进程 pid
@@ -315,6 +320,27 @@ runs/<runId>/agent-report.json
 - `terminationReason`
 - `stopRequestedAt`
 - `stopRequestedBy`
+
+### `status.json`
+
+`status.json` 是运行中状态快照，主要用于：
+- progress 通知
+- 活跃 run 查询
+- 判断任务当前阶段
+
+常见字段包括：
+- `phase`
+- `summary`
+- `updatedAt`
+- `sessionId`
+- `reporting.lastReportAt`
+- `reporting.reportCount`
+
+### 其它产物
+
+- `run.log`：完整原始执行日志
+- `agent-summary.txt`：agent 留下的人类可读总结（如有）
+- `agent-report.json`：agent 留下的结构化报告（如有）
 
 ## Stop / cancel 语义
 
@@ -333,7 +359,6 @@ runs/<runId>/agent-report.json
 wrapper 提供 progress 能力，但**默认策略建议由上层 skill / 调用方决定**，而不是让 wrapper 对所有任务一视同仁地强制开启。
 
 推荐做法：
-
 - **短任务 / 明显边界清晰的任务**：不传 progress 参数
 - **时长不确定但通常不长的任务**：默认仍不开，除非用户明确要求
 - **明确长任务**：再传
@@ -341,6 +366,31 @@ wrapper 提供 progress 能力，但**默认策略建议由上层 skill / 调用
   - `--progress-every-seconds 180`
 
 这样可以避免把通知通道变成噪音，同时保留长任务的过程可见性。
+
+## 二次开发指南
+
+如果你想在这个项目上继续开发，建议先从下面这些入口理解结构：
+
+- `src/cli.ts`：CLI 入口与子命令解析
+- `src/runner.ts`：run 生命周期主流程
+- `src/monitor.ts`：progress cadence 与最近活动提炼
+- `src/reporter.ts`：通知发送
+- `src/status.ts`：`status.json` 读写
+- `src/stop.ts`：graceful cancellation
+- `src/query.ts`：`runs` / `show` 查询能力
+- `src/adapters.ts`：Codex / Claude 的命令适配层
+- `skills/coding-assistant/`：与 wrapper 同步演进的 OpenClaw skill
+
+建议的开发顺序通常是：
+1. 先明确是要改 CLI 行为、运行态、通知策略还是 skill 策略
+2. 优先保持 `result.json` / `status.json` 契约稳定
+3. 改完后至少执行：
+
+```bash
+pnpm type-check
+pnpm lint
+pnpm build
+```
 
 ## 设计说明
 
@@ -352,7 +402,7 @@ wrapper 提供 progress 能力，但**默认策略建议由上层 skill / 调用
 
 ## 当前限制
 
-- 第一版没有实现任务队列、并发控制、重试策略
+- 第一版没有实现任务队列、重试策略
 - 当前默认不支持同一个 `cwd` 的并行 run；若 future 需要并行，应结合 git worktree（不同工作目录）单独设计，而不是绕过 single-flight
 - 第一版没有统一抽象所有代理的结构化输出协议
 - `Claude Code` 目前重点是命令拼装与运行骨架，深度适配仍待继续补充
@@ -364,6 +414,7 @@ wrapper 提供 progress 能力，但**默认策略建议由上层 skill / 调用
 ```bash
 pnpm type-check
 pnpm lint
+pnpm build
 ```
 
 ## 后续可扩展方向
