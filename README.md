@@ -158,6 +158,13 @@ node dist/cli.js run \
   --detach
 ```
 
+中途停止一个后台 run：
+
+```bash
+node dist/cli.js stop \
+  --run-id 20260311093830-stop-probe-v2
+```
+
 也支持给底层代理透传额外参数，在 `--` 后面填写：
 
 ```bash
@@ -178,6 +185,7 @@ node dist/cli.js run \
 - `--progress-start-after-seconds <n>`：首条运行中汇报最早在启动后多少秒允许发送
 - `--progress-every-seconds <n>`：运行中汇报的固定节奏间隔（由 wrapper 自己控制）
 - `--output-root <path>`：结果输出根目录，默认是当前命令目录下的 `runs`
+- `stop --run-id <id>`：请求优雅停止一个后台 run，成功时最终状态会落成 `cancelled`
 - `-- ...`：透传给底层代理命令的额外参数
 
 ## 结果文件位置
@@ -217,6 +225,18 @@ runs/<runId>/status.json
 - `pid`
 - `claimedAt`
 - `terminationReason`
+
+## Stop / cancel 语义
+
+当前 wrapper 已支持通过 `stop --run-id <id>` 请求中途停止后台 run。
+
+停止流程的目标是：
+- 优先优雅停止正在运行的 wrapper / coding agent 进程
+- 保留 `run.log` / `result.json` / `status.json` 等产物
+- 最终状态记为 `cancelled`，而不是 `failed`
+- 向用户发送“后台任务已停止”通知
+
+如果被打断的项目是 git 仓库，是否保留工作区中已产生的改动应由上层调用方/用户明确决定；wrapper 本身不会擅自清理用户代码改动。
 
 ## Progress 策略建议
 
