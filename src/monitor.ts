@@ -161,7 +161,9 @@ function buildProgressText(
 ): string {
   const elapsedMinutes = (elapsedSeconds / 60).toFixed(1);
   const name = options.label ?? context.runId;
-  const progressSummary = recentActivity ?? status.summary;
+  const progressSummaryLines = recentActivity
+    ? recentActivity.split("\n").filter(Boolean)
+    : [status.summary];
 
   return [
     `后台任务进行中：${name}`,
@@ -177,7 +179,7 @@ function buildProgressText(
     `• ${context.taskSummary}`,
     "",
     "**【进度摘要】**",
-    `• ${progressSummary}`,
+    ...progressSummaryLines.map((line) => `• ${line}`),
     "",
     "**【会话】**",
     `• Session ID: ${status.sessionId ?? "unknown"}`,
@@ -208,28 +210,14 @@ async function readRecentMeaningfulActivity(
     const lines = content
       .split(/\r?\n/)
       .map((line) => line.trim())
-      .filter(Boolean);
+      .filter(Boolean)
+      .filter((line) => !isIgnorableLogFragment(line));
 
-    const recentActivities: string[] = [];
-    for (let index = lines.length - 1; index >= 0; index -= 1) {
-      const activity = normalizeMeaningfulLogLine(lines[index]);
-      if (!activity) {
-        continue;
-      }
-      if (recentActivities[0] === activity || recentActivities.includes(activity)) {
-        continue;
-      }
-      recentActivities.unshift(activity);
-      if (recentActivities.length >= 3) {
-        break;
-      }
-    }
-
-    if (recentActivities.length === 0) {
+    if (lines.length === 0) {
       return null;
     }
 
-    return truncateForDisplay(recentActivities.join(" | "), 240);
+    return lines.slice(-3).map((line) => truncateForDisplay(line, 160)).join("\n");
   } catch {
     return null;
   } finally {
@@ -237,57 +225,20 @@ async function readRecentMeaningfulActivity(
   }
 }
 
-function normalizeMeaningfulLogLine(line: string): string | null {
+function isIgnorableLogFragment(line: string): boolean {
   if (!line) {
-    return null;
-  }
-
-  const ignoredPrefixes = [
-    "[wrapper]",
-    "OpenAI Codex",
-    "workdir:",
-    "model:",
-    "provider:",
-    "approval:",
-    "sandbox:",
-    "reasoning effort:",
-    "reasoning summaries:",
-    "session id:",
-    "--------",
-    "tokens used",
-    "mcp:",
-    "mcp startup:",
-    "user",
-  ];
-  if (ignoredPrefixes.some((prefix) => line.startsWith(prefix))) {
-    return null;
-  }
-
-  if (line === "codex" || line === "thinking" || line === "exec") {
-    return null;
+    return true;
   }
 
   if (/^[{}\[\](),:;]+$/.test(line)) {
-    return null;
+    return true;
   }
 
   if (/^\d+$/.test(line)) {
-    return null;
+    return true;
   }
 
-  if (/^succeeded in /i.test(line) || /^failed in /i.test(line)) {
-    return `最近命令结果：${line}`;
-  }
-
-  if (line.startsWith("/bin/sh -lc ")) {
-    return `最近执行：${truncateForDisplay(line, 160)}`;
-  }
-
-  if (line.startsWith("**") || line.startsWith("- ")) {
-    return truncateForDisplay(line, 160);
-  }
-
-  return truncateForDisplay(line, 160);
+  return false;
 }
 
 function truncateForDisplay(value: string, maxChars: number): string {
