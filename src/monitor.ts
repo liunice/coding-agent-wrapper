@@ -1,3 +1,8 @@
+/**
+ * Controls wrapper-driven progress reporting and renders the running-status block.
+ * Important note: progress cadence stays wrapper-owned, while message content remains lightweight.
+ */
+
 import { open } from "node:fs/promises";
 
 import { sendProgressNotification } from "./reporter";
@@ -8,6 +13,7 @@ interface MonitorController {
   stop(): void;
 }
 
+/** Starts the timer-driven progress monitor for one active wrapper run. */
 export function startProgressMonitor(
   options: RunCliOptions,
   context: RunContext,
@@ -152,6 +158,7 @@ function getNextScheduledReportAtMs(
   return firstReportAtMs + slotIndex * everyMs;
 }
 
+/** Builds the human-readable running status message sent by progress notifications. */
 function buildProgressText(
   options: RunCliOptions,
   context: RunContext,
@@ -172,6 +179,7 @@ function buildProgressText(
     `• Agent: ${options.agent}`,
     `• Phase: ${status.phase}`,
     `• Run ID: ${context.runId}`,
+    `• 目录: ${resolveProgressWorkdir(options, status)}`,
     `• 已运行(分钟): ${elapsedMinutes}`,
     `• 最近更新: ${formatDisplayTime(status.updatedAt)}`,
     "",
@@ -248,6 +256,15 @@ function truncateForDisplay(value: string, maxChars: number): string {
   return value.length <= maxChars
     ? value
     : `${value.slice(0, maxChars - 3)}...`;
+}
+
+/** Resolves a stable workdir string for progress messages without throwing. */
+function resolveProgressWorkdir(
+  options: RunCliOptions,
+  status: RunStatusSnapshot,
+): string {
+  const workdir = status.cwd || options.cwd;
+  return workdir || "unknown";
 }
 
 function formatDisplayTime(value: string | null): string {
