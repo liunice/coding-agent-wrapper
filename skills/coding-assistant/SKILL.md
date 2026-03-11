@@ -49,18 +49,19 @@ If the user does not specify the agent:
 - Refuse to launch in OpenClaw's own workspace/config area unless the user explicitly asks and understands the risk
 - If the repository has its own `AGENTS.md`, read it before launching the coding task
 
-### 2. Choose notification mode
+### 2. Choose notification inputs
 
-Use the wrapper's hybrid notify contract.
+At launch time, make sure the wrapper has enough information to notify the user when the run starts, progresses, or finishes.
 
-- **Telegram / Discord / WhatsApp / other message channels**:
-  prefer explicit notify routing, or configure defaults in `openclaw.json -> skills.entries.coding-assistant.env` via `NOTIFY_*`
-- **webchat / Control UI / session-only contexts**:
-  pass `--notify-session-key <current session key>`
-- If you have both explicit target info and session key, pass both; the wrapper will send provider/channel delivery first and then also inject the same message into the session
-- In Telegram / Discord / WhatsApp and similar provider contexts, pass `--notify-channel`, `--notify-target`, `--notify-account` when available; if you also have `sessionKey`, pass `--notify-session-key` too
-- If `notifyReplyTo` is available from the source message, pass it as well so completion messages stay threaded when the provider supports reply routing
-- Do not hardcode bot tokens, Telegram ids, or account ids in the skill itself; keep them in OpenClaw config
+Recommended inputs:
+- in **Telegram / Discord / WhatsApp / other message-channel contexts**, pass explicit provider delivery info when available:
+  - `--notify-channel`
+  - `--notify-target`
+  - `--notify-account`
+- if the source message provides a reply anchor, pass `--notify-reply-to` so completion messages can stay attached to the triggering message when supported
+- if a current OpenClaw session key is available, also pass `--notify-session-key`
+- for default routing, prefer configuring `NOTIFY_*` values in `openclaw.json -> skills.entries.coding-assistant.env`
+- do not hardcode bot tokens, Telegram ids, or account ids in the skill itself; keep them in OpenClaw config
 
 ### 3. Shape the task prompt
 
@@ -154,7 +155,7 @@ node dist/cli.js run \
   --detach
 ```
 
-If the current channel needs explicit provider delivery and no wrapper defaults are configured yet, add the needed `--notify-channel / --notify-target / --notify-account` flags at launch time. If a current session key is also available, keep passing it so the wrapper can supplement provider delivery with `chat.inject`.
+If the current channel needs explicit provider delivery and no wrapper defaults are configured yet, add the needed `--notify-channel / --notify-target / --notify-account` flags at launch time. If a current session key is also available, pass `--notify-session-key` too.
 
 Notes:
 - `--detach` is the default for long coding work
