@@ -60,7 +60,7 @@ export interface ShowCliOptions extends BaseCliOptions {
 
 export interface TailCliOptions extends BaseCliOptions {
   command: "tail";
-  runId: string;
+  runId?: string;
   lines: number;
   follow: boolean;
 }

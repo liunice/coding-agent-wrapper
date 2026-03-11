@@ -215,10 +215,17 @@ Use them like this:
 When the user asks "is it still running?", check `status.json` and `result.json` first, then prefer the wrapper tail command if you need recent log output:
 
 ```bash
+node dist/cli.js tail
+node dist/cli.js tail -n 30
+node dist/cli.js tail -f
 node dist/cli.js tail <run-id>
 node dist/cli.js tail <run-id> -n 30
 node dist/cli.js tail <run-id> -f
 ```
+
+Notes:
+- `tail` now allows omitting `<run-id>` and defaults to the most recent run (prefer the newest running run; otherwise the newest run overall)
+- the command prints a short `Run ID` / `Status` header before log lines, including finished exit codes when available
 
 Do not default to hand-building `runs/<runId>/run.log` paths plus system `tail` when the wrapper command is available.
 

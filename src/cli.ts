@@ -231,10 +231,7 @@ function parseCliArgs(argv: string[]): CliOptions | null {
     return null;
   }
 
-  if (
-    (command === "stop" || command === "show" || command === "tail") &&
-    !runId
-  ) {
+  if ((command === "stop" || command === "show") && !runId) {
     return null;
   }
 
@@ -325,10 +322,6 @@ function parseCliArgs(argv: string[]): CliOptions | null {
   }
 
   if (command === "tail") {
-    if (!runId) {
-      return null;
-    }
-
     const options: TailCliOptions = {
       command,
       runId,
@@ -402,7 +395,7 @@ function readRequiredValue(flag: string, value: string | undefined): string {
 /** Prints the short usage guide for the wrapper CLI. */
 function printUsage(): void {
   process.stdout.write(
-    "coding-agent-wrapper\n\nUsage:\n  node dist/cli.js run --agent <codex|claude> --cwd <path> --task <text> [--label <text>] [--detach] [--new-session] [--progress-every-seconds <n>] [--progress-start-after-seconds <n>] [--output-root <path>] [--notify-session-key <key>] [--notify-channel <name> --notify-target <id> [--notify-account <id>] [--notify-reply-to <id>] [--notify-thread-id <id>]] [-- ...passthrough]\n  node dist/cli.js stop --run-id <id> [--output-root <path>]\n  node dist/cli.js runs [--output-root <path>]\n  node dist/cli.js show --run-id <id> [--output-root <path>]\n  node dist/cli.js tail <run-id> [-n <count>] [-f] [--output-root <path>]\n",
+    "coding-agent-wrapper\n\nUsage:\n  node dist/cli.js run --agent <codex|claude> --cwd <path> --task <text> [--label <text>] [--detach] [--new-session] [--progress-every-seconds <n>] [--progress-start-after-seconds <n>] [--output-root <path>] [--notify-session-key <key>] [--notify-channel <name> --notify-target <id> [--notify-account <id>] [--notify-reply-to <id>] [--notify-thread-id <id>]] [-- ...passthrough]\n  node dist/cli.js stop --run-id <id> [--output-root <path>]\n  node dist/cli.js runs [--output-root <path>]\n  node dist/cli.js show --run-id <id> [--output-root <path>]\n  node dist/cli.js tail [run-id] [-n <count>] [-f] [--output-root <path>]\n",
   );
 }
 

@@ -1,44 +1,242 @@
 /**
  * Provides a wrapper-native tail command for run logs.
- * Important note: follow mode uses Node-based polling instead of shelling out
- * to system tail so behavior stays portable and easier to extend.
+ * Important note: it can resolve the latest run automatically and always
+ * prints a small run header before the tailed log content.
  */
 
 import { constants } from "node:fs";
-import { access, open, stat } from "node:fs/promises";
+import { access, open, readFile, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 
-import type { TailCliOptions } from "./types";
+import { readRunStatus } from "./status";
+import type { RunResult, RunStatusSnapshot, TailCliOptions } from "./types";
 
 /** Poll interval for follow mode when checking for appended log content. */
 const FOLLOW_POLL_INTERVAL_MS = 500;
 
+/** Matches the sortable timestamp prefix embedded in normal run ids. */
+const RUN_ID_TIMESTAMP_PATTERN = /^(\d{14})(?:-|$)/;
+
+interface ResolvedTailTarget {
+  runId: string;
+  logPath: string;
+  statusText: string;
+}
+
+interface RunCandidate {
+  runId: string;
+  runDir: string;
+  startedAtMs: number;
+  modifiedAtMs: number;
+  timestampPrefix: number | null;
+  isRunning: boolean;
+}
+
 /** Runs the `tail` subcommand against one wrapper run log. */
 export async function tailRunLog(options: TailCliOptions): Promise<number> {
-  const logPath = await resolveRunLogPath(options);
-  const { fileSize, text } = await readLastLines(logPath, options.lines);
+  const target = await resolveTailTarget(options);
+  writeHeader(target);
+
+  const { fileSize, text } = await readLastLines(target.logPath, options.lines);
   writeOutput(text);
 
   if (!options.follow) {
     return 0;
   }
 
-  await followLogFile(logPath, fileSize);
+  await followLogFile(target.logPath, fileSize);
   return 0;
 }
 
-/** Resolves the expected run.log path and validates it exists. */
-async function resolveRunLogPath(options: TailCliOptions): Promise<string> {
-  const runDir = path.resolve(options.outputRoot, options.runId);
+/** Resolves the target run, log path, and header metadata for one tail request. */
+async function resolveTailTarget(
+  options: TailCliOptions,
+): Promise<ResolvedTailTarget> {
+  const runId = options.runId ?? (await resolveLatestRunId(options.outputRoot));
+  const runDir = path.resolve(options.outputRoot, runId);
   const logPath = path.join(runDir, "run.log");
 
   try {
     await access(logPath, constants.F_OK | constants.R_OK);
   } catch {
-    throw new Error(`Run log not found for runId ${options.runId}: ${logPath}`);
+    throw new Error(`Run log not found for runId ${runId}: ${logPath}`);
   }
 
-  return logPath;
+  const [status, result] = await Promise.all([
+    readRunStatus(path.join(runDir, "status.json")),
+    readRunResult(path.join(runDir, "result.json")),
+  ]);
+
+  return {
+    runId,
+    logPath,
+    statusText: formatRunStatus(status, result),
+  };
+}
+
+/** Resolves the most recent run following the dev-plan selection rules. */
+async function resolveLatestRunId(outputRoot: string): Promise<string> {
+  let entries: Array<{ isDirectory(): boolean; name: string }> = [];
+  try {
+    entries = await readdir(outputRoot, { withFileTypes: true });
+  } catch {
+    throw new Error(`No runs found in output root: ${outputRoot}`);
+  }
+
+  const candidates = (
+    await Promise.all(
+      entries
+        .filter((entry) => entry.isDirectory() && entry.name !== "active-runs")
+        .map(async (entry) => await readRunCandidate(outputRoot, entry.name)),
+    )
+  ).filter((candidate): candidate is RunCandidate => candidate !== null);
+
+  if (candidates.length === 0) {
+    throw new Error(`No runs found in output root: ${outputRoot}`);
+  }
+
+  const runningCandidates = candidates.filter(
+    (candidate) => candidate.isRunning,
+  );
+  const pool = runningCandidates.length > 0 ? runningCandidates : candidates;
+  pool.sort(compareRunCandidates);
+  return pool[0].runId;
+}
+
+/** Reads one run directory into a sortable candidate for latest-run resolution. */
+async function readRunCandidate(
+  outputRoot: string,
+  runId: string,
+): Promise<RunCandidate | null> {
+  const runDir = path.resolve(outputRoot, runId);
+  const [runStat, status, result] = await Promise.all([
+    stat(runDir).catch(() => null),
+    readRunStatus(path.join(runDir, "status.json")),
+    readRunResult(path.join(runDir, "result.json")),
+  ]);
+
+  if (!runStat) {
+    return null;
+  }
+
+  return {
+    runId,
+    runDir,
+    startedAtMs: resolveStartedAtMs(status, result),
+    modifiedAtMs: runStat.mtimeMs,
+    timestampPrefix: readRunIdTimestampPrefix(runId),
+    isRunning: isRunConsideredRunning(status, result),
+  };
+}
+
+/** Sorts candidates by run-id timestamp prefix, then by fallback timestamps. */
+function compareRunCandidates(left: RunCandidate, right: RunCandidate): number {
+  if (left.timestampPrefix !== right.timestampPrefix) {
+    if (left.timestampPrefix === null) {
+      return 1;
+    }
+    if (right.timestampPrefix === null) {
+      return -1;
+    }
+    return right.timestampPrefix - left.timestampPrefix;
+  }
+
+  if (left.startedAtMs !== right.startedAtMs) {
+    return right.startedAtMs - left.startedAtMs;
+  }
+
+  if (left.modifiedAtMs !== right.modifiedAtMs) {
+    return right.modifiedAtMs - left.modifiedAtMs;
+  }
+
+  return right.runId.localeCompare(left.runId);
+}
+
+/** Reads the numeric timestamp prefix from a normal wrapper run id. */
+function readRunIdTimestampPrefix(runId: string): number | null {
+  const match = RUN_ID_TIMESTAMP_PATTERN.exec(runId);
+  if (!match) {
+    return null;
+  }
+
+  const parsed = Number.parseInt(match[1], 10);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+/** Resolves whether a run should count as currently running. */
+function isRunConsideredRunning(
+  status: RunStatusSnapshot | null,
+  result: RunResult | null,
+): boolean {
+  if (result?.status === "running") {
+    return true;
+  }
+
+  if (status?.status === "running") {
+    return true;
+  }
+
+  return (
+    status?.finishedAt === null &&
+    (status.phase === "queued" ||
+      status.phase === "starting" ||
+      status.phase === "running" ||
+      status.phase === "summarizing")
+  );
+}
+
+/** Resolves a sortable started-at timestamp from status/result metadata. */
+function resolveStartedAtMs(
+  status: RunStatusSnapshot | null,
+  result: RunResult | null,
+): number {
+  const rawValue = status?.startedAt ?? result?.startedAt ?? null;
+  if (!rawValue) {
+    return 0;
+  }
+
+  const parsed = Date.parse(rawValue);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+/** Formats the tail header status line from status/result metadata. */
+function formatRunStatus(
+  status: RunStatusSnapshot | null,
+  result: RunResult | null,
+): string {
+  if (isRunConsideredRunning(status, result)) {
+    return "running";
+  }
+
+  const resolvedStatus = result?.status ?? status?.status ?? null;
+  const resolvedExitCode = result?.exitCode ?? null;
+
+  if (resolvedStatus && resolvedStatus !== "running") {
+    return `${resolvedStatus} (exit ${resolvedExitCode ?? "unknown"})`;
+  }
+
+  if (status?.phase === "completed") {
+    return `success (exit ${resolvedExitCode ?? "unknown"})`;
+  }
+
+  return "unknown";
+}
+
+/** Reads the run result file when available. */
+async function readRunResult(filePath: string): Promise<RunResult | null> {
+  try {
+    const content = await readFile(filePath, "utf8");
+    return JSON.parse(content) as RunResult;
+  } catch {
+    return null;
+  }
+}
+
+/** Writes the required run metadata header before any tailed log content. */
+function writeHeader(target: ResolvedTailTarget): void {
+  process.stdout.write(
+    `Run ID: ${target.runId}\nStatus: ${target.statusText}\n\n`,
+  );
 }
 
 /** Reads the last N lines without depending on the system tail binary. */
