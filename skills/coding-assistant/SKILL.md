@@ -179,7 +179,7 @@ Do not spam progress updates. Only send another update when:
 
 ### 8. If the user asks to stop the task
 
-When the user says things like “停掉”, “取消这个任务”, “别跑了”, or otherwise asks to stop an active wrapper run:
+When the user says things like “stop this”, “cancel this task”, “kill that run”, or otherwise asks to stop an active wrapper run:
 
 - prefer the wrapper's formal stop path (do not treat this as an abnormal crash)
 - if the target run is ambiguous, first inspect active runs with `runs` / `show --run-id`
@@ -213,7 +213,7 @@ Use them like this:
 - `agent-summary.txt`: human-friendly summary left by the coding agent when available
 - `agent-report.json`: structured report emitted by the coding agent when available
 
-When the user asks "还在跑吗？", check `status.json` and `result.json` first, then tail `run.log` if needed.
+When the user asks "is it still running?", check `status.json` and `result.json` first, then tail `run.log` if needed.
 
 ## Result contract
 
