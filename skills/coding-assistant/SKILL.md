@@ -79,6 +79,27 @@ Good prompt shape:
 - how to verify
 - what summary to leave behind
 
+### 3.1 Prefer `docs/dev-plan/` for complex tasks
+
+If the task is too complex to explain cleanly in just a few chat sentences or a short CLI argument, prefer writing a dedicated development plan document inside the **target project** first.
+
+Recommended pattern:
+- create `docs/dev-plan/` in the target repository when it does not exist
+- add a task-specific plan file such as `docs/dev-plan/2026-03-11-notify-routing-fix.md`
+- put the full scope, constraints, validation plan, and completion contract into that file
+- launch the coding agent with a **short prompt** that tells it to read that document first and then execute it
+
+Why this is the default for larger tasks:
+- avoids overly long CLI `--task` strings
+- reduces shell quoting / escaping risk
+- makes the task easier to resume later
+- leaves a human-reviewable plan inside the project during active work
+
+Important repo hygiene note:
+- `docs/dev-plan/` is for active task planning, not long-term product docs
+- if the repository should not keep these plan files, add `docs/dev-plan/` to `.gitignore`
+- do not assume every project wants these files committed; follow repo conventions or the user's request
+
 ### 4. Resume behavior
 
 By default, prefer resuming the latest conversation for the same `agent + workdir`.
