@@ -1,7 +1,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 
 import type {
-  CliOptions,
+  RunCliOptions,
   RunContext,
   RunPhase,
   RunRuntimeState,
@@ -14,9 +14,11 @@ interface RunStatusUpdate {
   phase?: RunPhase;
   summary?: string;
   status?: RunStatus;
-  resultState?: "pending" | "success" | "failed";
+  resultState?: "pending" | "success" | "failed" | "cancelled";
   sessionId?: string | null;
   resumedFromSessionId?: string | null;
+  stopRequestedAt?: string | null;
+  stopRequestedBy?: string | null;
   lastProgressAt?: string | null;
   reporting?: {
     lastReportAt?: string | null;
@@ -33,7 +35,7 @@ const DEFAULT_REPORTING_STATE = {
 } as const;
 
 export async function initializeRunStatus(
-  options: CliOptions,
+  options: RunCliOptions,
   context: RunContext,
   runtimeState: RunRuntimeState,
   summary = "Run created.",
@@ -60,6 +62,9 @@ export async function initializeRunStatus(
     sessionId: null,
     resumedFromSessionId: null,
     pid: runtimeState.pid,
+    childPid: runtimeState.childPid ?? null,
+    stopRequestedAt: null,
+    stopRequestedBy: null,
     claimedAt: runtimeState.claimedAt,
     terminationReason: runtimeState.terminationReason,
     lastProgressAt: now,
@@ -71,7 +76,7 @@ export async function initializeRunStatus(
 }
 
 export async function patchRunStatus(
-  options: CliOptions,
+  options: RunCliOptions,
   context: RunContext,
   update: RunStatusUpdate,
 ): Promise<RunStatusSnapshot> {
@@ -96,7 +101,16 @@ export async function patchRunStatus(
       update.resumedFromSessionId !== undefined
         ? update.resumedFromSessionId
         : (current?.resumedFromSessionId ?? null),
+    stopRequestedAt:
+      update.stopRequestedAt !== undefined
+        ? update.stopRequestedAt
+        : (current?.stopRequestedAt ?? null),
+    stopRequestedBy:
+      update.stopRequestedBy !== undefined
+        ? update.stopRequestedBy
+        : (current?.stopRequestedBy ?? null),
     pid: update.runtimeState?.pid ?? current?.pid ?? null,
+    childPid: update.runtimeState?.childPid ?? current?.childPid ?? null,
     claimedAt: update.runtimeState?.claimedAt ?? current?.claimedAt ?? null,
     terminationReason:
       update.runtimeState?.terminationReason ??
@@ -159,7 +173,7 @@ function shouldBumpProgressTimestamp(update: RunStatusUpdate): boolean {
 }
 
 function createFallbackSnapshot(
-  options: CliOptions,
+  options: RunCliOptions,
   context: RunContext,
 ): RunStatusSnapshot {
   return {
@@ -183,6 +197,9 @@ function createFallbackSnapshot(
     sessionId: null,
     resumedFromSessionId: null,
     pid: null,
+    childPid: null,
+    stopRequestedAt: null,
+    stopRequestedBy: null,
     claimedAt: null,
     terminationReason: null,
     lastProgressAt: context.startedAt,

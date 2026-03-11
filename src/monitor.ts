@@ -2,14 +2,14 @@ import { open } from "node:fs/promises";
 
 import { sendProgressNotification } from "./reporter";
 import { patchRunStatus, readRunStatus } from "./status";
-import type { CliOptions, RunContext, RunStatusSnapshot } from "./types";
+import type { RunCliOptions, RunContext, RunStatusSnapshot } from "./types";
 
 interface MonitorController {
   stop(): void;
 }
 
 export function startProgressMonitor(
-  options: CliOptions,
+  options: RunCliOptions,
   context: RunContext,
   log: (line: string) => void,
 ): MonitorController {
@@ -153,7 +153,7 @@ function getNextScheduledReportAtMs(
 }
 
 function buildProgressText(
-  options: CliOptions,
+  options: RunCliOptions,
   context: RunContext,
   status: RunStatusSnapshot,
   elapsedSeconds: number,

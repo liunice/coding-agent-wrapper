@@ -3,7 +3,7 @@ import { constants, accessSync } from "node:fs";
 import path from "node:path";
 
 import { getCodingAssistantSkillConfig } from "./config";
-import type { CliOptions } from "./types";
+import type { RunCliOptions } from "./types";
 
 interface NotifyAttempt {
   name: string;
@@ -11,7 +11,7 @@ interface NotifyAttempt {
 }
 
 export async function sendProgressNotification(
-  options: CliOptions,
+  options: RunCliOptions,
   text: string,
   log: (line: string) => void,
 ): Promise<boolean> {
@@ -19,7 +19,7 @@ export async function sendProgressNotification(
 }
 
 export async function sendCompletionNotification(
-  options: CliOptions,
+  options: RunCliOptions,
   text: string,
   log: (line: string) => void,
 ): Promise<boolean> {
@@ -27,7 +27,7 @@ export async function sendCompletionNotification(
 }
 
 async function sendNotification(
-  options: CliOptions,
+  options: RunCliOptions,
   text: string,
   log: (line: string) => void,
   kind: "progress" | "completion",
@@ -55,7 +55,7 @@ async function sendNotification(
 }
 
 function buildNotifyAttempts(
-  options: CliOptions,
+  options: RunCliOptions,
   text: string,
 ): NotifyAttempt[] {
   const attempts: NotifyAttempt[] = [];

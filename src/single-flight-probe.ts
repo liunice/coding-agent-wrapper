@@ -302,6 +302,7 @@ function buildRunningResult(
     sessionId: null,
     resumedFromSessionId: null,
     pid: 999999,
+    childPid: null,
     claimedAt: new Date().toISOString(),
     terminationReason: null,
     modifiedFiles: [],

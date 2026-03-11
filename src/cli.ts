@@ -8,7 +8,13 @@ import path from "node:path";
 import process from "node:process";
 
 import { createRunContext, executeRun, launchDetached } from "./runner";
-import type { CliOptions, SupportedAgent } from "./types";
+import { stopRun } from "./stop";
+import type {
+  CliOptions,
+  RunCliOptions,
+  StopCliOptions,
+  SupportedAgent,
+} from "./types";
 
 /** Supported agent names accepted by the CLI. */
 const SUPPORTED_AGENTS: SupportedAgent[] = ["codex", "claude"];
@@ -20,6 +26,11 @@ async function main(): Promise<void> {
   if (!options) {
     printUsage();
     process.exitCode = 1;
+    return;
+  }
+
+  if (options.command === "stop") {
+    process.exitCode = await stopRun(options);
     return;
   }
 
@@ -50,7 +61,9 @@ async function main(): Promise<void> {
 function parseCliArgs(argv: string[]): CliOptions | null {
   const args = [...argv];
 
-  if (args[0] === "run") {
+  let command: "run" | "stop" = "run";
+  if (args[0] === "run" || args[0] === "stop") {
+    command = args[0] as "run" | "stop";
     args.shift();
   }
 
@@ -168,7 +181,11 @@ function parseCliArgs(argv: string[]): CliOptions | null {
     }
   }
 
-  if (!agent || !cwd || !task) {
+  if (command === "run" && (!agent || !cwd || !task)) {
+    return null;
+  }
+
+  if (command === "stop" && !runId) {
     return null;
   }
 
@@ -181,7 +198,39 @@ function parseCliArgs(argv: string[]): CliOptions | null {
     );
   }
 
-  return {
+  if (command === "stop") {
+    if (!runId) {
+      return null;
+    }
+
+    const options: StopCliOptions = {
+      command,
+      runId,
+      label,
+      detach,
+      outputRoot,
+      internalRun,
+      startedAt,
+      progressEverySeconds,
+      progressStartAfterSeconds,
+      resumeMode,
+      notifySessionKey,
+      notifyChannel,
+      notifyTarget,
+      notifyAccount,
+      notifyReplyTo,
+      notifyThreadId,
+      passthroughArgs,
+    };
+    return options;
+  }
+
+  if (!agent || !cwd || !task) {
+    return null;
+  }
+
+  const options: RunCliOptions = {
+    command,
     agent,
     cwd,
     task,
@@ -202,6 +251,7 @@ function parseCliArgs(argv: string[]): CliOptions | null {
     notifyThreadId,
     passthroughArgs,
   };
+  return options;
 }
 
 /** Validates the requested agent against the supported list. */
@@ -224,7 +274,7 @@ function readRequiredValue(flag: string, value: string | undefined): string {
 /** Prints the short usage guide for the wrapper CLI. */
 function printUsage(): void {
   process.stdout.write(
-    "coding-agent-wrapper\n\nUsage:\n  node dist/cli.js run --agent <codex|claude> --cwd <path> --task <text> [--label <text>] [--detach] [--new-session] [--progress-every-seconds <n>] [--progress-start-after-seconds <n>] [--output-root <path>] [--notify-session-key <key>] [--notify-channel <name> --notify-target <id> [--notify-account <id>] [--notify-reply-to <id>] [--notify-thread-id <id>]] [-- ...passthrough]\n",
+    "coding-agent-wrapper\n\nUsage:\n  node dist/cli.js run --agent <codex|claude> --cwd <path> --task <text> [--label <text>] [--detach] [--new-session] [--progress-every-seconds <n>] [--progress-start-after-seconds <n>] [--output-root <path>] [--notify-session-key <key>] [--notify-channel <name> --notify-target <id> [--notify-account <id>] [--notify-reply-to <id>] [--notify-thread-id <id>]] [-- ...passthrough]\n  node dist/cli.js stop --run-id <id> [--output-root <path>]\n",
   );
 }
 

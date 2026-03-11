@@ -28,8 +28,8 @@ import {
 import { initializeRunStatus, patchRunStatus } from "./status";
 import type {
   AgentReport,
-  CliOptions,
   RepoSnapshot,
+  RunCliOptions,
   RunContext,
   RunResult,
   RunRuntimeState,
@@ -41,7 +41,7 @@ const MAX_CAPTURED_OUTPUT = 256 * 1024;
 
 /** Creates or resolves all filesystem paths needed for a single run. */
 export async function createRunContext(
-  options: CliOptions,
+  options: RunCliOptions,
 ): Promise<RunContext> {
   const startedAt = options.startedAt ?? new Date().toISOString();
   const runId =
@@ -71,7 +71,7 @@ export async function createRunContext(
 
 /** Starts a detached child that continues the real run in the background. */
 export async function launchDetached(
-  options: CliOptions,
+  options: RunCliOptions,
   context: RunContext,
 ): Promise<void> {
   const claim = await acquireActiveRunClaim(
@@ -195,7 +195,7 @@ export async function launchDetached(
 
 /** Executes one agent run and returns the final process exit code. */
 export async function executeRun(
-  options: CliOptions,
+  options: RunCliOptions,
   context: RunContext,
 ): Promise<number> {
   const claim = options.internalRun
@@ -250,6 +250,52 @@ export async function executeRun(
         env: spec.env,
         stdio: ["ignore", "pipe", "pipe"],
       });
+
+      let cancellationRequested = false;
+      let cancellationFinished = false;
+      let cancellationSignalSent = false;
+      const requestCancellation = (): void => {
+        if (cancellationRequested) {
+          return;
+        }
+        cancellationRequested = true;
+        activeLogStream.write(
+          "\n[wrapper] cancellation requested; sending SIGTERM to child\n",
+        );
+        void patchRunStatus(options, context, {
+          phase: "running",
+          summary: "Stop requested by user; attempting graceful shutdown.",
+          stopRequestedAt: new Date().toISOString(),
+          stopRequestedBy: "user",
+        });
+        if (!cancellationSignalSent && child.pid) {
+          cancellationSignalSent = true;
+          try {
+            process.kill(child.pid, "SIGTERM");
+          } catch {
+            // ignore missing child
+          }
+          setTimeout(() => {
+            if (cancellationFinished || !child.pid) {
+              return;
+            }
+            try {
+              process.kill(child.pid, "SIGKILL");
+              activeLogStream.write(
+                "[wrapper] graceful shutdown timed out; sent SIGKILL to child\n",
+              );
+            } catch {
+              // ignore missing child
+            }
+          }, 8000).unref();
+        }
+      };
+
+      const handleTerminationSignal = (): void => {
+        requestCancellation();
+      };
+      process.once("SIGTERM", handleTerminationSignal);
+      process.once("SIGINT", handleTerminationSignal);
 
       await patchRunStatus(options, context, {
         phase: "starting",
@@ -309,7 +355,8 @@ export async function executeRun(
         phase: "running",
         summary: "Agent process started; waiting for progress output.",
         runtimeState: {
-          pid: child.pid ?? getRunRuntimeState(claim).pid,
+          pid: getRunRuntimeState(claim).pid,
+          childPid: child.pid ?? null,
           claimedAt: getRunRuntimeState(claim).claimedAt,
           terminationReason: getRunRuntimeState(claim).terminationReason,
         },
@@ -333,7 +380,15 @@ export async function executeRun(
         });
       });
 
-      const status: RunStatus = exitCode === 0 ? "success" : "failed";
+      cancellationFinished = true;
+      process.removeListener("SIGTERM", handleTerminationSignal);
+      process.removeListener("SIGINT", handleTerminationSignal);
+
+      const status: RunStatus = cancellationRequested
+        ? "cancelled"
+        : exitCode === 0
+          ? "success"
+          : "failed";
       let sessionId = sessionDetection.sessionId;
 
       if (!sessionId) {
@@ -360,24 +415,22 @@ export async function executeRun(
       }
 
       await patchRunStatus(options, context, {
-        phase: "summarizing",
-        summary:
-          "Agent process finished; building summary and result artifacts.",
+        phase: cancellationRequested ? "cancelled" : "summarizing",
+        summary: cancellationRequested
+          ? "Run cancelled by user; building final cancellation artifacts."
+          : "Agent process finished; building summary and result artifacts.",
         sessionId,
       });
 
-      const summary = await buildSummary(
-        context,
-        capturedStdout,
-        capturedStderr,
-        exitCode,
-      );
+      const summary = cancellationRequested
+        ? "Run cancelled by user during execution."
+        : await buildSummary(context, capturedStdout, capturedStderr, exitCode);
 
       const finishedAt = new Date().toISOString();
-      const finalRuntimeState = getRunRuntimeState(
-        claim,
-        buildTerminationReason(status, exitCode),
-      );
+      const finalRuntimeState = {
+        ...getRunRuntimeState(claim, buildTerminationReason(status, exitCode)),
+        childPid: child.pid ?? null,
+      };
 
       await writeResultFile(
         options,
@@ -392,12 +445,26 @@ export async function executeRun(
       );
       await patchRunStatus(options, context, {
         finishedAt,
-        phase: status === "success" ? "completed" : "failed",
+        phase:
+          status === "success"
+            ? "completed"
+            : status === "cancelled"
+              ? "cancelled"
+              : "failed",
         summary,
         status,
-        resultState: status === "success" ? "success" : "failed",
+        resultState:
+          status === "success"
+            ? "success"
+            : status === "cancelled"
+              ? "cancelled"
+              : "failed",
         sessionId,
         resumedFromSessionId: spec.resumedSessionId ?? null,
+        stopRequestedAt: cancellationRequested
+          ? new Date().toISOString()
+          : undefined,
+        stopRequestedBy: cancellationRequested ? "user" : undefined,
         runtimeState: finalRuntimeState,
       });
       await sendCompletionNotification(
@@ -420,7 +487,7 @@ export async function executeRun(
 
 /** Writes the JSON artifact consumed by humans or higher-level tooling. */
 export async function writeResultFile(
-  options: CliOptions,
+  options: RunCliOptions,
   context: RunContext,
   status: RunStatus,
   exitCode: number | null,
@@ -482,6 +549,7 @@ export async function writeResultFile(
     sessionId,
     resumedFromSessionId,
     pid: runtimeState.pid,
+    childPid: runtimeState.childPid ?? null,
     claimedAt: runtimeState.claimedAt,
     terminationReason: runtimeState.terminationReason,
     modifiedFiles: projectModifiedFiles,
@@ -498,7 +566,7 @@ export async function writeResultFile(
 
 /** Produces a compact notification line for downstream delivery. */
 async function buildNotificationText(
-  options: CliOptions,
+  options: RunCliOptions,
   context: RunContext,
   status: RunStatus,
   exitCode: number,
@@ -513,12 +581,22 @@ async function buildNotificationText(
     result?.validationSummary ??
     formatValidationSummary(result?.validation ?? []);
 
+  const title =
+    status === "cancelled"
+      ? `后台任务已停止：${name}`
+      : `后台任务已完成：${name}`;
+
+  const statusLine =
+    status === "cancelled"
+      ? "• 状态: cancelled (user stop)"
+      : `• 状态: ${status} (exit ${exitCode})`;
+
   return [
-    `后台任务已完成：${name}`,
+    title,
     "",
     "**【任务信息】**",
     `• Agent: ${options.agent}`,
-    `• 状态: ${status} (exit ${exitCode})`,
+    statusLine,
     `• Run ID: ${context.runId}`,
     `• 目录: ${options.cwd}`,
     "",
@@ -626,7 +704,7 @@ function extractClaudeSummary(stdout: string): string | null {
 
 /** Builds a readable log file prelude for each run. */
 function buildLogHeader(
-  options: CliOptions,
+  options: RunCliOptions,
   context: RunContext,
   command: string,
   args: string[],
@@ -723,7 +801,7 @@ function appendCapturedText(current: string, next: string): string {
  * detection did not find a session id.
  */
 async function extractSessionIdFromRunLog(
-  agent: CliOptions["agent"],
+  agent: RunCliOptions["agent"],
   logPath: string,
   logStream: ReturnType<typeof createWriteStream>,
 ): Promise<string | null> {
@@ -872,6 +950,10 @@ function buildTerminationReason(
 
   if (status === "success") {
     return "completed";
+  }
+
+  if (status === "cancelled") {
+    return "user_cancelled";
   }
 
   return typeof exitCode === "number" ? `exit-${exitCode}` : "failed";

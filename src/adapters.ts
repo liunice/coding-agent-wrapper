@@ -5,7 +5,7 @@
 
 import { getCodingAssistantSkillConfig } from "./config";
 import { getResumeSessionId } from "./sessions";
-import type { AgentLaunchSpec, CliOptions, RunContext } from "./types";
+import type { AgentLaunchSpec, RunCliOptions, RunContext } from "./types";
 
 /** Default flags for local Codex runs in externally sandboxed environments. */
 const DEFAULT_CODEX_FLAGS = ["--dangerously-bypass-approvals-and-sandbox"];
@@ -20,7 +20,7 @@ const DEFAULT_CLAUDE_FLAGS = [
 
 /** Resolves a supported agent adapter into a concrete launch specification. */
 export async function createAgentLaunchSpec(
-  options: CliOptions,
+  options: RunCliOptions,
   context: RunContext,
 ): Promise<AgentLaunchSpec> {
   switch (options.agent) {
@@ -34,7 +34,7 @@ export async function createAgentLaunchSpec(
 }
 
 function buildWrappedTaskPrompt(
-  options: CliOptions,
+  options: RunCliOptions,
   context: RunContext,
 ): string {
   return `${options.task}\n\n---\nCompletion contract (required):\n1. Write a concise natural-language summary of completed work to: ${context.summaryPath}\n2. Write a JSON object to: ${context.reportPath}\n3. JSON schema:\n{\n  \"taskSummary\": string,\n  \"modifiedFiles\": string[],\n  \"projectModifiedFiles\": string[] | null,\n  \"artifactFiles\": string[] | null,\n  \"validation\": string[],\n  \"validationSummary\": string | null,\n  \"notes\": string | null,\n  \"commitId\": string | null\n}\n4. If this repository is managed by git and the coding task is successfully implemented + checked, you should create a git commit and put the new commit id into commitId.\n5. If the repo is not using git, or you intentionally did not commit, set commitId to null.\n6. Prefer projectModifiedFiles for actual project/worktree edits and artifactFiles for wrapper-generated artifacts such as agent-summary.txt or agent-report.json.\n7. If you only provide modifiedFiles, list only actual project/worktree edits there unless the task truly changed no project files.\n8. validationSummary should be a short single-line summary such as: \"build ✅, typecheck ✅\" when applicable.`;
@@ -42,7 +42,7 @@ function buildWrappedTaskPrompt(
 
 /** Builds the non-interactive Codex command for one task execution. */
 async function buildCodexLaunchSpec(
-  options: CliOptions,
+  options: RunCliOptions,
   context: RunContext,
 ): Promise<AgentLaunchSpec> {
   const command = process.env.CODING_AGENT_WRAPPER_CODEX_BIN ?? "codex";
@@ -98,7 +98,7 @@ async function buildCodexLaunchSpec(
 
 /** Builds the initial Claude Code command shape for one task execution. */
 async function buildClaudeLaunchSpec(
-  options: CliOptions,
+  options: RunCliOptions,
   context: RunContext,
 ): Promise<AgentLaunchSpec> {
   const command = process.env.CODING_AGENT_WRAPPER_CLAUDE_BIN ?? "claude";

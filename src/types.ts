@@ -5,7 +5,7 @@
 
 export type SupportedAgent = "codex" | "claude";
 
-export type RunStatus = "running" | "success" | "failed";
+export type RunStatus = "running" | "success" | "failed" | "cancelled";
 
 export type RunPhase =
   | "queued"
@@ -16,11 +16,9 @@ export type RunPhase =
   | "failed"
   | "cancelled";
 
-/** Describes CLI options after parsing and normalization. */
-export interface CliOptions {
-  agent: SupportedAgent;
-  cwd: string;
-  task: string;
+/** Describes CLI options shared by run/stop commands. */
+interface BaseCliOptions {
+  command: "run" | "stop";
   label?: string;
   detach: boolean;
   outputRoot: string;
@@ -38,6 +36,21 @@ export interface CliOptions {
   notifyThreadId?: string;
   passthroughArgs: string[];
 }
+
+export interface RunCliOptions extends BaseCliOptions {
+  command: "run";
+  agent: SupportedAgent;
+  cwd: string;
+  task: string;
+}
+
+export interface StopCliOptions extends BaseCliOptions {
+  command: "stop";
+  runId: string;
+}
+
+/** Describes CLI options after parsing and normalization. */
+export type CliOptions = RunCliOptions | StopCliOptions;
 
 /** Describes the launch shape that each agent adapter must provide. */
 export interface AgentLaunchSpec {
@@ -107,6 +120,7 @@ export interface RunResult {
   sessionId: string | null;
   resumedFromSessionId: string | null;
   pid: number | null;
+  childPid: number | null;
   claimedAt: string | null;
   terminationReason: string | null;
   modifiedFiles: string[];
@@ -117,6 +131,7 @@ export interface RunResult {
 /** Describes the runtime ownership fields persisted into result.json. */
 export interface RunRuntimeState {
   pid: number | null;
+  childPid?: number | null;
   claimedAt: string | null;
   terminationReason: string | null;
 }
@@ -139,7 +154,7 @@ export interface RunStatusSnapshot {
   phase: RunPhase;
   summary: string;
   status: RunStatus;
-  resultState: "pending" | "success" | "failed";
+  resultState: "pending" | "success" | "failed" | "cancelled";
   logPath: string;
   resultPath: string;
   statusPath: string;
@@ -148,8 +163,11 @@ export interface RunStatusSnapshot {
   sessionId: string | null;
   resumedFromSessionId: string | null;
   pid: number | null;
+  childPid: number | null;
   claimedAt: string | null;
   terminationReason: string | null;
+  stopRequestedAt: string | null;
+  stopRequestedBy: string | null;
   lastProgressAt: string | null;
   reporting: RunReportingState;
 }
