@@ -154,9 +154,7 @@ git diff --stat
 
 ## Safety notes
 
-- Do not launch coding assistants inside `~/.openclaw` unless explicitly requested
+- Do not launch coding assistant inside `~/.openclaw` unless explicitly requested
 - Do not let the task sprawl across the entire repo when the user asked for a small scoped fix
 - Prefer Codex by default for implementation work in this environment
-- Keep `CODEX_API_KEY` in skill env / OpenClaw config, never hardcode it in scripts
-- Keep Telegram / channel routing in OpenClaw config or call-time flags, never hardcode chat ids in the skill itself
 - If the repo has local instructions (`AGENTS.md`), read them before launching
