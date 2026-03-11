@@ -210,14 +210,26 @@ async function readRecentMeaningfulActivity(
       .map((line) => line.trim())
       .filter(Boolean);
 
+    const recentActivities: string[] = [];
     for (let index = lines.length - 1; index >= 0; index -= 1) {
       const activity = normalizeMeaningfulLogLine(lines[index]);
-      if (activity) {
-        return activity;
+      if (!activity) {
+        continue;
+      }
+      if (recentActivities[0] === activity || recentActivities.includes(activity)) {
+        continue;
+      }
+      recentActivities.unshift(activity);
+      if (recentActivities.length >= 3) {
+        break;
       }
     }
 
-    return null;
+    if (recentActivities.length === 0) {
+      return null;
+    }
+
+    return truncateForDisplay(recentActivities.join(" | "), 240);
   } catch {
     return null;
   } finally {
@@ -252,6 +264,14 @@ function normalizeMeaningfulLogLine(line: string): string | null {
   }
 
   if (line === "codex" || line === "thinking" || line === "exec") {
+    return null;
+  }
+
+  if (/^[{}\[\](),:;]+$/.test(line)) {
+    return null;
+  }
+
+  if (/^\d+$/.test(line)) {
     return null;
   }
 
