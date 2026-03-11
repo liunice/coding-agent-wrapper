@@ -7,6 +7,15 @@ export type SupportedAgent = "codex" | "claude";
 
 export type RunStatus = "running" | "success" | "failed";
 
+export type RunPhase =
+  | "queued"
+  | "starting"
+  | "running"
+  | "summarizing"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
 /** Describes CLI options after parsing and normalization. */
 export interface CliOptions {
   agent: SupportedAgent;
@@ -51,6 +60,7 @@ export interface RunContext {
   runDir: string;
   logPath: string;
   resultPath: string;
+  statusPath: string;
   summaryPath: string;
   reportPath: string;
   startedAt: string;
@@ -83,6 +93,7 @@ export interface RunResult {
   status: RunStatus;
   logPath: string;
   resultPath: string;
+  statusPath: string;
   summaryPath: string;
   reportPath: string;
   summary: string;
@@ -106,4 +117,37 @@ export interface RunRuntimeState {
   pid: number | null;
   claimedAt: string | null;
   terminationReason: string | null;
+}
+
+export interface RunReportingState {
+  lastReportAt: string | null;
+  lastReportedPhase: RunPhase | null;
+  reportCount: number;
+}
+
+export interface RunStatusSnapshot {
+  runId: string;
+  agent: SupportedAgent;
+  cwd: string;
+  label?: string;
+  taskSummary: string;
+  startedAt: string;
+  updatedAt: string;
+  finishedAt: string | null;
+  phase: RunPhase;
+  summary: string;
+  status: RunStatus;
+  resultState: "pending" | "success" | "failed";
+  logPath: string;
+  resultPath: string;
+  statusPath: string;
+  summaryPath: string;
+  reportPath: string;
+  sessionId: string | null;
+  resumedFromSessionId: string | null;
+  pid: number | null;
+  claimedAt: string | null;
+  terminationReason: string | null;
+  lastProgressAt: string | null;
+  reporting: RunReportingState;
 }

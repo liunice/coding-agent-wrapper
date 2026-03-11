@@ -24,6 +24,7 @@ import {
   releaseActiveRunClaim,
   transferActiveRunClaim,
 } from "./single-flight";
+import { initializeRunStatus, patchRunStatus } from "./status";
 import type {
   AgentReport,
   CliOptions,
@@ -47,6 +48,7 @@ export async function createRunContext(
   const runDir = path.resolve(options.outputRoot, runId);
   const logPath = path.join(runDir, "run.log");
   const resultPath = path.join(runDir, "result.json");
+  const statusPath = path.join(runDir, "status.json");
   const summaryPath = path.join(runDir, "agent-summary.txt");
   const reportPath = path.join(runDir, "agent-report.json");
 
@@ -57,6 +59,7 @@ export async function createRunContext(
     runDir,
     logPath,
     resultPath,
+    statusPath,
     summaryPath,
     reportPath,
     startedAt,
@@ -78,6 +81,12 @@ export async function launchDetached(
   );
 
   try {
+    await initializeRunStatus(
+      options,
+      context,
+      getRunRuntimeState(claim),
+      "Detached run started.",
+    );
     await writeResultFile(
       options,
       context,
@@ -147,6 +156,11 @@ export async function launchDetached(
     }
 
     await transferActiveRunClaim(claim, child.pid);
+    await patchRunStatus(options, context, {
+      phase: "queued",
+      summary: "Detached run started.",
+      runtimeState: getRunRuntimeState(claim),
+    });
     await writeResultFile(
       options,
       context,
@@ -188,6 +202,12 @@ export async function executeRun(
   let logStream: ReturnType<typeof createWriteStream> | null = null;
 
   try {
+    await initializeRunStatus(
+      options,
+      context,
+      getRunRuntimeState(claim),
+      "Run started.",
+    );
     await writeResultFile(
       options,
       context,
@@ -215,9 +235,18 @@ export async function executeRun(
         stdio: ["ignore", "pipe", "pipe"],
       });
 
+      await patchRunStatus(options, context, {
+        phase: "starting",
+        summary: "Launching coding agent process.",
+        resumedFromSessionId: spec.resumedSessionId ?? null,
+      });
+
       let capturedStdout = "";
       let capturedStderr = "";
       const sessionDetection = createSessionDetectionState();
+
+      let lastPersistedSessionId: string | null = null;
+      let lastStatusHeartbeatAt = Date.now();
 
       const handleChildText = (
         streamName: "stdout" | "stderr",
@@ -232,6 +261,22 @@ export async function executeRun(
         detectSessionIdFromStream(options.agent, sessionDetection, text);
         activeLogStream.write(text);
 
+        const detectedSessionId = sessionDetection.sessionId;
+        if (detectedSessionId && detectedSessionId !== lastPersistedSessionId) {
+          lastPersistedSessionId = detectedSessionId;
+          void patchRunStatus(options, context, {
+            phase: "running",
+            summary: "Agent session established; task is running.",
+            sessionId: detectedSessionId,
+          });
+        } else if (Date.now() - lastStatusHeartbeatAt >= 15000) {
+          lastStatusHeartbeatAt = Date.now();
+          void patchRunStatus(options, context, {
+            phase: "running",
+            summary: "Agent is still running.",
+          });
+        }
+
         if (options.internalRun) {
           return;
         }
@@ -243,6 +288,16 @@ export async function executeRun(
 
         process.stderr.write(text);
       };
+
+      await patchRunStatus(options, context, {
+        phase: "running",
+        summary: "Agent process started; waiting for progress output.",
+        runtimeState: {
+          pid: child.pid ?? getRunRuntimeState(claim).pid,
+          claimedAt: getRunRuntimeState(claim).claimedAt,
+          terminationReason: getRunRuntimeState(claim).terminationReason,
+        },
+      });
 
       child.stdout?.on("data", (chunk: Buffer) => {
         handleChildText("stdout", chunk.toString());
@@ -281,7 +336,19 @@ export async function executeRun(
           sessionId,
         );
         activeLogStream.write(`[wrapper] sessionId=${sessionId}\n`);
+        await patchRunStatus(options, context, {
+          phase: "running",
+          summary: "Captured agent session id.",
+          sessionId,
+        });
       }
+
+      await patchRunStatus(options, context, {
+        phase: "summarizing",
+        summary:
+          "Agent process finished; building summary and result artifacts.",
+        sessionId,
+      });
 
       const summary = await buildSummary(
         context,
@@ -290,17 +357,33 @@ export async function executeRun(
         exitCode,
       );
 
+      const finishedAt = new Date().toISOString();
+      const finalRuntimeState = getRunRuntimeState(
+        claim,
+        buildTerminationReason(status, exitCode),
+      );
+
       await writeResultFile(
         options,
         context,
         status,
         exitCode,
-        new Date().toISOString(),
+        finishedAt,
         summary,
         sessionId,
         spec.resumedSessionId ?? null,
-        getRunRuntimeState(claim, buildTerminationReason(status, exitCode)),
+        finalRuntimeState,
       );
+      await patchRunStatus(options, context, {
+        finishedAt,
+        phase: status === "success" ? "completed" : "failed",
+        summary,
+        status,
+        resultState: status === "success" ? "success" : "failed",
+        sessionId,
+        resumedFromSessionId: spec.resumedSessionId ?? null,
+        runtimeState: finalRuntimeState,
+      });
       await notifyCompletion(
         options,
         await buildNotificationText(options, context, status, exitCode),
@@ -370,6 +453,7 @@ export async function writeResultFile(
     status,
     logPath: context.logPath,
     resultPath: context.resultPath,
+    statusPath: context.statusPath,
     summaryPath: context.summaryPath,
     reportPath: context.reportPath,
     summary,

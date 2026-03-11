@@ -290,6 +290,7 @@ function buildRunningResult(
     status: "running",
     logPath: path.join(runDir, "run.log"),
     resultPath,
+    statusPath: path.join(runDir, "status.json"),
     summaryPath: path.join(runDir, "agent-summary.txt"),
     reportPath: path.join(runDir, "agent-report.json"),
     summary: "running",
