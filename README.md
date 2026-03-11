@@ -102,16 +102,14 @@ flowchart TD
     W --> W5[agent-report.json]
 ```
 
-## 安装
+## 在 OpenClaw 中启用 repo 内置 skill
+
+开始前，先在仓库根目录执行：
 
 ```bash
 pnpm install
 pnpm build
 ```
-
-也可以直接在仓库内通过 `pnpm exec` 运行编译后的 CLI。
-
-## 在 OpenClaw 中启用 repo 内置 skill
 
 本仓库内置了一个与 wrapper 同步维护的 `coding-assistant` skill，目录位于：
 
@@ -342,7 +340,9 @@ runs/<runId>/agent-report.json
 - `agent-summary.txt`：agent 留下的人类可读总结（如有）
 - `agent-report.json`：agent 留下的结构化报告（如有）
 
-## Stop / cancel 语义
+## 运行行为与默认策略
+
+### Stop / cancel 语义
 
 当前 wrapper 已支持通过 `stop --run-id <id>` 请求中途停止后台 run。
 
@@ -354,7 +354,7 @@ runs/<runId>/agent-report.json
 
 如果被打断的项目是 git 仓库，是否保留工作区中已产生的改动应由上层调用方/用户明确决定；wrapper 本身不会擅自清理用户代码改动。
 
-## Progress 策略建议
+### Progress 策略建议
 
 wrapper 提供 progress 能力，但**默认策略建议由上层 skill / 调用方决定**，而不是让 wrapper 对所有任务一视同仁地强制开启。
 
