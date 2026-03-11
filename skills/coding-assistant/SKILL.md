@@ -111,14 +111,14 @@ By default, prefer resuming the latest conversation for the same `agent + workdi
 
 ### 5. Decide progress notification policy
 
-Do **not** enable progress notifications for every coding task by default.
+Do **not** enable progress notifications for every coding task by default, but treat **medium and larger background coding tasks** as progress-worthy by default.
 
 Use this policy:
 - **tiny / short / obviously bounded tasks**: do not pass progress flags
-- **normal tasks with unclear duration**: default to no progress unless the user asks for it
-- **clearly long-running tasks** (bigger implementations, refactors, broad test-fix loops, multi-step debugging): enable wrapper-controlled progress notifications
+- **medium or larger tasks** (for example: multi-file implementation, design + code + docs + validation, unclear debugging loops, refactors, or anything that is not realistically a quick one-shot change): enable wrapper-controlled progress notifications by default
+- **if the user explicitly says progress is unnecessary**: skip progress even for a medium/large task
 
-When you decide to enable progress notifications, prefer conservative defaults:
+When enabling progress notifications, use these conservative defaults unless the user requested something else:
 - `--progress-start-after-seconds 120`
 - `--progress-every-seconds 180`
 
