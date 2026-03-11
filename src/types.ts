@@ -28,6 +28,7 @@ export interface CliOptions {
   runId?: string;
   startedAt?: string;
   progressEverySeconds?: number;
+  progressStartAfterSeconds?: number;
   resumeMode: "auto" | "never";
   notifySessionKey?: string;
   notifyChannel?: string;

@@ -128,6 +128,12 @@ export async function launchDetached(
         String(options.progressEverySeconds),
       );
     }
+    if (options.progressStartAfterSeconds !== undefined) {
+      args.push(
+        "--progress-start-after-seconds",
+        String(options.progressStartAfterSeconds),
+      );
+    }
 
     if (options.notifySessionKey) {
       args.push("--notify-session-key", options.notifySessionKey);

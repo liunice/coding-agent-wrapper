@@ -68,6 +68,7 @@ function parseCliArgs(argv: string[]): CliOptions | null {
   let runId: string | undefined;
   let startedAt: string | undefined;
   let progressEverySeconds: number | undefined;
+  let progressStartAfterSeconds: number | undefined;
   let resumeMode: "auto" | "never" = "auto";
   let notifySessionKey: string | undefined;
   let notifyChannel: string | undefined;
@@ -124,6 +125,20 @@ function parseCliArgs(argv: string[]): CliOptions | null {
           );
         }
         break;
+      case "--progress-start-after-seconds":
+        progressStartAfterSeconds = Number.parseInt(
+          readRequiredValue(value, args[++index]),
+          10,
+        );
+        if (
+          !Number.isFinite(progressStartAfterSeconds) ||
+          progressStartAfterSeconds < 0
+        ) {
+          throw new Error(
+            "--progress-start-after-seconds must be a non-negative integer",
+          );
+        }
+        break;
       case "--notify-session-key":
         notifySessionKey = readRequiredValue(value, args[++index]);
         break;
@@ -177,6 +192,7 @@ function parseCliArgs(argv: string[]): CliOptions | null {
     runId,
     startedAt,
     progressEverySeconds,
+    progressStartAfterSeconds,
     resumeMode,
     notifySessionKey,
     notifyChannel,
@@ -208,7 +224,7 @@ function readRequiredValue(flag: string, value: string | undefined): string {
 /** Prints the short usage guide for the wrapper CLI. */
 function printUsage(): void {
   process.stdout.write(
-    "coding-agent-wrapper\n\nUsage:\n  node dist/cli.js run --agent <codex|claude> --cwd <path> --task <text> [--label <text>] [--detach] [--new-session] [--progress-every-seconds <n>] [--output-root <path>] [--notify-session-key <key>] [--notify-channel <name> --notify-target <id> [--notify-account <id>] [--notify-reply-to <id>] [--notify-thread-id <id>]] [-- ...passthrough]\n",
+    "coding-agent-wrapper\n\nUsage:\n  node dist/cli.js run --agent <codex|claude> --cwd <path> --task <text> [--label <text>] [--detach] [--new-session] [--progress-every-seconds <n>] [--progress-start-after-seconds <n>] [--output-root <path>] [--notify-session-key <key>] [--notify-channel <name> --notify-target <id> [--notify-account <id>] [--notify-reply-to <id>] [--notify-thread-id <id>]] [-- ...passthrough]\n",
   );
 }
 
