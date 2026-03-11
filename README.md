@@ -36,11 +36,16 @@
 - 自动写入：
   - `run.log`
   - `result.json`
+  - `status.json`
   - `agent-summary.txt`（若底层 agent 显式输出/写入）
 - 任务结束后自动通知：
   - 外部聊天渠道优先走 `openclaw message send`
   - session / webchat 场景回退到 `chat.inject`
   - 默认通知路由可从 `openclaw.json -> skills.entries.coding-assistant.env` 中的 `NOTIFY_*` 环境变量读取
+- 支持可选的运行中进度通知：
+  - 由 wrapper 自己的时钟控制汇报节奏
+  - 可通过 `--progress-start-after-seconds` 与 `--progress-every-seconds` 控制
+  - 适合明确长任务，不建议对所有短任务默认开启
 - 完成通知与 `result.json` 会尽量包含：
   - 开始时间 / 完成时间 / 耗时(分钟)
   - `【任务目标】` 与 `【任务总结】` 两个独立区块
@@ -102,6 +107,19 @@ node dist/cli.js run \
   --detach
 ```
 
+长任务启用 wrapper 控制的运行中汇报：
+
+```bash
+node dist/cli.js run \
+  --agent codex \
+  --cwd /path/to/repo \
+  --task "Implement the feature, run validation, and fix follow-up issues if needed." \
+  --label feature-work \
+  --progress-start-after-seconds 120 \
+  --progress-every-seconds 180 \
+  --detach
+```
+
 也支持给底层代理透传额外参数，在 `--` 后面填写：
 
 ```bash
@@ -119,6 +137,8 @@ node dist/cli.js run \
 - `--task <text>`：要执行的任务描述
 - `--label <text>`：可选标签，用于 runId 可读性
 - `--detach`：后台运行
+- `--progress-start-after-seconds <n>`：首条运行中汇报最早在启动后多少秒允许发送
+- `--progress-every-seconds <n>`：运行中汇报的固定节奏间隔（由 wrapper 自己控制）
 - `--output-root <path>`：结果输出根目录，默认是当前命令目录下的 `runs`
 - `-- ...`：透传给底层代理命令的额外参数
 
@@ -129,6 +149,7 @@ node dist/cli.js run \
 ```text
 runs/<runId>/run.log
 runs/<runId>/result.json
+runs/<runId>/status.json
 ```
 
 其中 `result.json` 至少包含：
@@ -144,11 +165,34 @@ runs/<runId>/result.json
 - `logPath`
 - `summary`
 
-当前运行中的 `result.json` 还会写入：
+当前还会额外写出运行中状态快照 `status.json`，用于进度播报与运行态检查，包含如下一类字段：
+
+- `phase`
+- `summary`
+- `updatedAt`
+- `sessionId`
+- `reporting.lastReportAt`
+- `reporting.reportCount`
+
+最终 `result.json` 仍是任务结束后的权威结果文件，其中运行中的 ownership 字段包括：
 
 - `pid`
 - `claimedAt`
 - `terminationReason`
+
+## Progress 策略建议
+
+wrapper 提供 progress 能力，但**默认策略建议由上层 skill / 调用方决定**，而不是让 wrapper 对所有任务一视同仁地强制开启。
+
+推荐做法：
+
+- **短任务 / 明显边界清晰的任务**：不传 progress 参数
+- **时长不确定但通常不长的任务**：默认仍不开，除非用户明确要求
+- **明确长任务**：再传
+  - `--progress-start-after-seconds 120`
+  - `--progress-every-seconds 180`
+
+这样可以避免把通知通道变成噪音，同时保留长任务的过程可见性。
 
 ## 设计说明
 
