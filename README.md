@@ -22,6 +22,44 @@
 
 这个仓库的第一版正是围绕这组需求设计：通知通道与结果通道分离，适合作为更大自动化流程中的一个基础执行块。
 
+## 运行流程图
+
+```mermaid
+flowchart TD
+    A[OpenClaw 主会话 / 用户请求] --> B[coding-assistant skill]
+    B --> C{是否适合用 wrapper?}
+    C -->|是| D[组装任务 / 选择通知策略]
+    C -->|否| Z[改走直接手改或其他路径]
+
+    D --> E[node dist/cli.js run ... --detach]
+    E --> F[创建 run 目录与 RunContext]
+    F --> G[写入初始 result.json / status.json]
+    G --> H{是否 detached?}
+    H -->|是| I[启动 internal-run 后台子进程]
+    H -->|否| J[当前进程直接执行]
+
+    I --> K[wrapper runner]
+    J --> K[wrapper runner]
+
+    K --> L[adapter 组装 Codex / Claude 命令]
+    L --> M[启动 coding agent 子进程]
+    M --> N[流式写 run.log]
+    N --> O[提取 sessionId / 更新 status.json]
+    O --> P[monitor 按 wrapper 时钟决定是否发 progress]
+    P --> Q[reporter 发送运行中通知]
+
+    M --> R[agent 完成或失败]
+    R --> S[生成 agent-summary.txt / agent-report.json]
+    S --> T[写最终 result.json / status.json]
+    T --> U[reporter 发送 completion 通知]
+    U --> V[用户查看 Telegram / 当前会话]
+
+    T --> W[后续排查读取 artifacts]
+    W --> W1[run.log]
+    W --> W2[result.json]
+    W --> W3[status.json]
+```
+
 ## 当前能力
 
 - 支持统一 CLI 参数：`agent`、`cwd`、`task`、`label`
