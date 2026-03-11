@@ -5,12 +5,13 @@
 
 import { spawn } from "node:child_process";
 import { execFile } from "node:child_process";
-import { constants, accessSync, createWriteStream } from "node:fs";
+import { createWriteStream } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { createAgentLaunchSpec } from "./adapters";
-import { getCodingAssistantSkillConfig } from "./config";
+import { startProgressMonitor } from "./monitor";
+import { sendCompletionNotification } from "./reporter";
 import {
   createSessionDetectionState,
   detectSessionIdFromStream,
@@ -121,6 +122,12 @@ export async function launchDetached(
     if (options.label) {
       args.push("--label", options.label);
     }
+    if (options.progressEverySeconds) {
+      args.push(
+        "--progress-every-seconds",
+        String(options.progressEverySeconds),
+      );
+    }
 
     if (options.notifySessionKey) {
       args.push("--notify-session-key", options.notifySessionKey);
@@ -200,6 +207,9 @@ export async function executeRun(
       );
 
   let logStream: ReturnType<typeof createWriteStream> | null = null;
+  const progressMonitor = startProgressMonitor(options, context, (line) => {
+    logStream?.write(`${line}\n`);
+  });
 
   try {
     await initializeRunStatus(
@@ -384,10 +394,10 @@ export async function executeRun(
         resumedFromSessionId: spec.resumedSessionId ?? null,
         runtimeState: finalRuntimeState,
       });
-      await notifyCompletion(
+      await sendCompletionNotification(
         options,
         await buildNotificationText(options, context, status, exitCode),
-        activeLogStream,
+        (line) => activeLogStream.write(`${line}\n`),
       );
 
       return exitCode;
@@ -397,6 +407,7 @@ export async function executeRun(
       }
     }
   } finally {
+    progressMonitor.stop();
     await releaseActiveRunClaim(claim);
   }
 }
@@ -532,170 +543,6 @@ async function buildNotificationText(
     `• 结果文件: ${formatRunArtifactPath(context.runId, context.resultPath)}`,
     `• 日志文件: ${formatRunArtifactPath(context.runId, context.logPath)}`,
   ].join("\n");
-}
-
-/** Sends the completion notification without failing the main run on errors. */
-async function notifyCompletion(
-  options: CliOptions,
-  text: string,
-  logStream: ReturnType<typeof createWriteStream>,
-): Promise<void> {
-  const openclawPath = resolveOpenClawBinary();
-  const command = openclawPath ?? "openclaw";
-  const attempts = buildNotifyAttempts(options, text);
-
-  if (attempts.length === 0) {
-    logStream.write("[wrapper] notify skipped=no-target\n");
-    return;
-  }
-
-  for (const attempt of attempts) {
-    logStream.write(
-      `[wrapper] notify attempt=${attempt.name} command=${renderCommand(command, attempt.args)}\n`,
-    );
-
-    const result = await runNotifyAttempt(command, attempt.args, logStream);
-    if (result === 0) {
-      return;
-    }
-  }
-}
-
-/** Resolves an absolute openclaw binary path when PATH inheritance is unreliable. */
-function buildNotifyAttempts(
-  options: CliOptions,
-  text: string,
-): Array<{ name: string; args: string[] }> {
-  const attempts: Array<{ name: string; args: string[] }> = [];
-  const skillNotify = getCodingAssistantSkillConfig().notify ?? {};
-  const notifyChannel = options.notifyChannel ?? skillNotify.channel;
-  const notifyTarget = options.notifyTarget ?? skillNotify.target;
-  const notifyAccount = options.notifyAccount ?? skillNotify.accountId;
-  const notifyReplyTo = options.notifyReplyTo ?? skillNotify.replyTo;
-  const notifyThreadId = options.notifyThreadId ?? skillNotify.threadId;
-  const notifySessionKey = options.notifySessionKey ?? skillNotify.sessionKey;
-
-  if (notifyTarget) {
-    const args = [
-      "message",
-      "send",
-      "--target",
-      notifyTarget,
-      "--message",
-      text,
-    ];
-
-    if (notifyChannel) {
-      args.push("--channel", notifyChannel);
-    }
-    if (notifyAccount) {
-      args.push("--account", notifyAccount);
-    }
-    if (notifyReplyTo) {
-      args.push("--reply-to", notifyReplyTo);
-    }
-    if (notifyThreadId) {
-      args.push("--thread-id", notifyThreadId);
-    }
-
-    attempts.push({ name: "message-send", args });
-  }
-
-  if (notifySessionKey) {
-    // TODO(webchat): `chat.inject` already writes the completion note into the target
-    // session transcript, but Control UI / webchat does not always surface that
-    // injected assistant message in the live chat view. Keep this session fallback
-    // for now, but revisit the Control UI rendering / subscription path later.
-    const params = {
-      sessionKey: notifySessionKey,
-      message: text,
-      label: "coding-agent-wrapper",
-    };
-
-    attempts.push({
-      name: "chat-inject",
-      args: [
-        "gateway",
-        "call",
-        "chat.inject",
-        "--params",
-        JSON.stringify(params),
-        "--timeout",
-        "10000",
-      ],
-    });
-  }
-
-  if (attempts.length === 0) {
-    attempts.push({
-      name: "system-event",
-      args: ["system", "event", "--text", text, "--mode", "now"],
-    });
-  }
-
-  return attempts;
-}
-
-async function runNotifyAttempt(
-  command: string,
-  args: string[],
-  logStream: ReturnType<typeof createWriteStream>,
-): Promise<number | null> {
-  return await new Promise<number | null>((resolve) => {
-    const child = spawn(command, args, {
-      stdio: "ignore",
-      env: process.env,
-    });
-
-    child.on("close", (code) => {
-      logStream.write(`[wrapper] notify exit=${code ?? "null"}\n`);
-      resolve(code ?? null);
-    });
-
-    child.on("error", (error) => {
-      logStream.write(`[wrapper] notify error=${error.message}\n`);
-      resolve(null);
-    });
-  });
-}
-
-function resolveOpenClawBinary(): string | null {
-  const candidates = [
-    process.env.OPENCLAW_BIN,
-    process.env.npm_config_prefix
-      ? path.join(process.env.npm_config_prefix, "bin", "openclaw")
-      : null,
-    process.env.HOME
-      ? path.join(process.env.HOME, ".npm-global/bin/openclaw")
-      : null,
-    "/volume1/homes/liunice/.npm-global/bin/openclaw",
-    "/usr/local/bin/openclaw",
-    "/usr/bin/openclaw",
-  ].filter((value): value is string => Boolean(value));
-
-  for (const candidate of candidates) {
-    try {
-      accessSync(candidate, constants.X_OK);
-      return candidate;
-    } catch {
-      // keep searching
-    }
-  }
-
-  const pathEntries = (process.env.PATH ?? "")
-    .split(path.delimiter)
-    .filter(Boolean);
-  for (const entry of pathEntries) {
-    const candidate = path.join(entry, "openclaw");
-    try {
-      accessSync(candidate, constants.X_OK);
-      return candidate;
-    } catch {
-      // keep searching
-    }
-  }
-
-  return null;
 }
 
 /** Reads the best available summary source after the child process exits. */

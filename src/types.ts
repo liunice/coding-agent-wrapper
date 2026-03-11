@@ -27,6 +27,7 @@ export interface CliOptions {
   internalRun: boolean;
   runId?: string;
   startedAt?: string;
+  progressEverySeconds?: number;
   resumeMode: "auto" | "never";
   notifySessionKey?: string;
   notifyChannel?: string;

@@ -18,6 +18,11 @@ interface RunStatusUpdate {
   sessionId?: string | null;
   resumedFromSessionId?: string | null;
   lastProgressAt?: string | null;
+  reporting?: {
+    lastReportAt?: string | null;
+    lastReportedPhase?: RunPhase | null;
+    reportCountIncrement?: number;
+  };
   runtimeState?: RunRuntimeState;
 }
 
@@ -103,7 +108,23 @@ export async function patchRunStatus(
         : shouldBumpProgressTimestamp(update)
           ? now
           : (current?.lastProgressAt ?? null),
-    reporting: current?.reporting ?? { ...DEFAULT_REPORTING_STATE },
+    reporting: {
+      ...(current?.reporting ?? { ...DEFAULT_REPORTING_STATE }),
+      lastReportAt:
+        update.reporting?.lastReportAt !== undefined
+          ? update.reporting.lastReportAt
+          : (current?.reporting.lastReportAt ??
+            DEFAULT_REPORTING_STATE.lastReportAt),
+      lastReportedPhase:
+        update.reporting?.lastReportedPhase !== undefined
+          ? update.reporting.lastReportedPhase
+          : (current?.reporting.lastReportedPhase ??
+            DEFAULT_REPORTING_STATE.lastReportedPhase),
+      reportCount:
+        (current?.reporting.reportCount ??
+          DEFAULT_REPORTING_STATE.reportCount) +
+        (update.reporting?.reportCountIncrement ?? 0),
+    },
   };
 
   await writeRunStatus(context.statusPath, next);
