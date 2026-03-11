@@ -353,7 +353,6 @@ pnpm build
 - 第一版没有统一抽象所有代理的结构化输出协议
 - `Claude Code` 目前重点是命令拼装与运行骨架，深度适配仍待继续补充
 - 后台任务由当前机器本地进程负责，不包含守护进程恢复能力
-- Webchat / Control UI 场景下，`chat.inject` 已能把完成通知写入目标 session transcript，但当前 UI 不一定会实时显示这条 injected assistant 消息；该遗漏已记录，后续需单独排查 Control UI 的显示/订阅链路
 
 ## 后续可扩展方向
 

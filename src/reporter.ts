@@ -66,6 +66,34 @@ function buildNotifyAttempts(
   const notifyReplyTo = options.notifyReplyTo ?? skillNotify.replyTo;
   const notifyThreadId = options.notifyThreadId ?? skillNotify.threadId;
   const notifySessionKey = options.notifySessionKey ?? skillNotify.sessionKey;
+  const preferSessionNotify = Boolean(options.notifySessionKey);
+
+  if (notifySessionKey) {
+    const params = {
+      sessionKey: notifySessionKey,
+      message: text,
+      label: "coding-agent-wrapper",
+    };
+
+    const chatInjectAttempt = {
+      name: "chat-inject",
+      args: [
+        "gateway",
+        "call",
+        "chat.inject",
+        "--params",
+        JSON.stringify(params),
+        "--timeout",
+        "10000",
+      ],
+    } satisfies NotifyAttempt;
+
+    if (preferSessionNotify) {
+      attempts.push(chatInjectAttempt);
+    } else {
+      attempts.push(chatInjectAttempt);
+    }
+  }
 
   if (notifyTarget) {
     const args = [
@@ -90,28 +118,16 @@ function buildNotifyAttempts(
       args.push("--thread-id", notifyThreadId);
     }
 
-    attempts.push({ name: "message-send", args });
-  }
+    const messageSendAttempt = {
+      name: "message-send",
+      args,
+    } satisfies NotifyAttempt;
 
-  if (notifySessionKey) {
-    const params = {
-      sessionKey: notifySessionKey,
-      message: text,
-      label: "coding-agent-wrapper",
-    };
-
-    attempts.push({
-      name: "chat-inject",
-      args: [
-        "gateway",
-        "call",
-        "chat.inject",
-        "--params",
-        JSON.stringify(params),
-        "--timeout",
-        "10000",
-      ],
-    });
+    if (preferSessionNotify) {
+      attempts.push(messageSendAttempt);
+    } else {
+      attempts.unshift(messageSendAttempt);
+    }
   }
 
   if (attempts.length === 0) {

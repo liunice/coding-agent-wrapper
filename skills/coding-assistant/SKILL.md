@@ -57,7 +57,7 @@ Use the wrapper's hybrid notify contract.
   prefer explicit notify routing, or configure defaults in `openclaw.json -> skills.entries.coding-assistant.env` via `NOTIFY_*`
 - **webchat / Control UI / session-only contexts**:
   pass `--notify-session-key <current session key>`
-- If you have both explicit target info and session key, pass both; the wrapper will try message delivery first and session fallback second
+- If you have both explicit target info and session key, pass both; when `--notify-session-key` is explicitly provided, the wrapper now prefers session delivery first and only falls back to channel delivery if session injection fails
 - Do not hardcode bot tokens, Telegram ids, or account ids in the skill itself; keep them in OpenClaw config
 
 ### 3. Shape the task prompt
@@ -240,10 +240,6 @@ If a direct background agent is used as fallback:
 - still record the background session id
 - still monitor with `process.log` / `process.poll`
 - still summarize changed files and status when done
-
-## Current known limitation
-
-For webchat / Control UI, session fallback uses `chat.inject`. The completion note is written to the target session transcript, but the current UI may not always surface that injected assistant message live. Treat this as a UI limitation, not a wrapper failure.
 
 ## References
 
