@@ -20,7 +20,6 @@
 - 你希望运行过程中有可观察的进度，而不是只在最后看结果
 - 你希望任务结束后有结构化结果文件，而不是只靠控制台滚动日志
 - 你希望可以查询当前有哪些 run 在执行，必要时中途优雅停止
-- 你在做 OpenClaw 集成，希望 skill、wrapper 和文档一起版本管理
 
 不适合的场景：
 - 只做一两行特别简单的本地改动
@@ -29,27 +28,12 @@
 
 ## 核心能力
 
-- 统一 CLI 参数：`agent`、`cwd`、`task`、`label`
-- 支持 `--detach` 后台运行
-- 支持 `codex` 适配
-- 支持 `claude` 适配骨架
-- 自动写入运行产物：
-  - `run.log`
-  - `result.json`
-  - `status.json`
-  - `agent-summary.txt`（若底层 agent 显式输出/写入）
-  - `agent-report.json`（若底层 agent 按约定写出结构化报告）
-- 支持可选的运行中进度通知：
-  - cadence 由 wrapper 自己控制
-  - 可通过 `--progress-start-after-seconds` 与 `--progress-every-seconds` 控制
-- 支持 active run 查询：
-  - `runs`
-  - `show --run-id <id>`
-- 支持 graceful cancellation：
-  - `stop --run-id <id>`
-  - 最终状态为 `cancelled`，而不是误记为 `failed`
-- 默认支持按 `agent + cwd` 复用最近一次 session id
-- 默认对同一项目目录启用 single-flight（同一 `cwd` 同时只允许一个活跃 run）
+- 把长时间运行的 coding 任务放到后台执行，而不是一直占住当前会话
+- 在任务执行过程中主动汇报进度，让用户知道任务还在推进
+- 为每次运行保留结构化结果与日志，便于后续查看、追踪和排查
+- 支持查看当前有哪些任务正在运行，以及查看单个任务的状态
+- 支持在任务中途优雅停止，并把结果明确记为 `cancelled`
+- 既可以作为 OpenClaw skill 的执行层使用，也可以直接作为 CLI 集成到别的自动化流程中
 
 ## 运行流程图
 
@@ -161,19 +145,7 @@ skills/coding-assistant/
 }
 ```
 
-这样做的好处是：skill 调用约定、路径、文档和 wrapper 实现可以一起做版本管理，避免 skill 文档和 wrapper 能力逐渐漂移。
-
-注意事项：
-- `skills.load.extraDirs` 的优先级较低；如果你本地已经有同名 `coding-assistant` skill，repo 内这份不会自动覆盖旧版本
-- 因此迁移时，最好先移走、停用或重命名旧的同名 skill，再启用本仓库内置版本
-- 启用后可用 `openclaw skills list` 检查 `coding-assistant` 是否来自 `openclaw-extra`
-- 本仓库内 skill 的命令示例默认假设你在 **wrapper repo root** 下执行，因此推荐使用：
-
-```bash
-node dist/cli.js ...
-```
-
-而不是把绝对路径硬编码到每条命令里。
+启用后可用 `openclaw skills list` 检查 `coding-assistant` 是否来自 `openclaw-extra`。
 
 ## 使用方式
 
@@ -340,32 +312,6 @@ runs/<runId>/agent-report.json
 - `agent-summary.txt`：agent 留下的人类可读总结（如有）
 - `agent-report.json`：agent 留下的结构化报告（如有）
 
-## 运行行为与默认策略
-
-### Stop / cancel 语义
-
-当前 wrapper 已支持通过 `stop --run-id <id>` 请求中途停止后台 run。
-
-停止流程的目标是：
-- 优先优雅停止正在运行的 wrapper / coding agent 进程
-- 保留 `run.log` / `result.json` / `status.json` 等产物
-- 最终状态记为 `cancelled`，而不是 `failed`
-- 向用户发送“后台任务已停止”通知
-
-如果被打断的项目是 git 仓库，是否保留工作区中已产生的改动应由上层调用方/用户明确决定；wrapper 本身不会擅自清理用户代码改动。
-
-### Progress 策略建议
-
-wrapper 提供 progress 能力，但**默认策略建议由上层 skill / 调用方决定**，而不是让 wrapper 对所有任务一视同仁地强制开启。
-
-推荐做法：
-- **短任务 / 明显边界清晰的任务**：不传 progress 参数
-- **时长不确定但通常不长的任务**：默认仍不开，除非用户明确要求
-- **明确长任务**：再传
-  - `--progress-start-after-seconds 120`
-  - `--progress-every-seconds 180`
-
-这样可以避免把通知通道变成噪音，同时保留长任务的过程可见性。
 
 ## 二次开发指南
 
@@ -409,15 +355,11 @@ pnpm build
 - 后台任务由当前机器本地进程负责，不包含守护进程恢复能力
 - Webchat / Control UI 场景下，`chat.inject` 已能把完成通知写入目标 session transcript，但当前 UI 不一定会实时显示这条 injected assistant 消息；该遗漏已记录，后续需单独排查 Control UI 的显示/订阅链路
 
-## 本地验证
-
-```bash
-pnpm type-check
-pnpm lint
-pnpm build
-```
-
 ## 后续可扩展方向
 
 - 增加更多 agent 适配器
 - 增加结果 JSON 的更强结构化字段
+
+## Credits
+
+repo 内置的 `coding-assistant` skill 在设计与演进时参考了 OpenClaw 内置的 `coding-agent` 技能思路，并在此基础上补充了本项目的 wrapper、progress、query 和 cancellation 能力。
