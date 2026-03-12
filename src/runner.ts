@@ -119,6 +119,10 @@ export async function launchDetached(
       context.startedAt,
     ];
 
+    if (options.resumeMode === "never") {
+      args.push("--new-session");
+    }
+
     if (options.label) {
       args.push("--label", options.label);
     }
