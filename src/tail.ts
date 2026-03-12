@@ -17,7 +17,11 @@ const FOLLOW_POLL_INTERVAL_MS = 500;
 /** Allows probes to exercise the interactive TTY path without a real terminal. */
 const FORCE_TTY_ENV = "CODING_AGENT_WRAPPER_TAIL_FORCE_TTY";
 
-/** Prefix used by wrapper-internal log lines. */
+/**
+ * Stable prefix contract for wrapper-internal run.log lines.
+ * All wrapper-authored operational lines must start with this prefix so tail
+ * and future tooling can reliably distinguish wrapper noise from agent output.
+ */
 const WRAPPER_LOG_PREFIX = "[wrapper]";
 
 /** Placeholder shown when filtering hides every visible line in TTY mode. */

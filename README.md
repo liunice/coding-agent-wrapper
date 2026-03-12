@@ -282,7 +282,7 @@ node dist/cli.js run \
 - `stop --run-id <id>`：请求优雅停止一个后台 run，成功时最终状态会落成 `cancelled`
 - `runs`：列出当前活跃 run 的简要信息
 - `show --run-id <id>`：查看某个 run 的 `status.json` / `result.json` 摘要
-- `tail [run-id] [-n <count>] [-f]`：查看某个 run 的 `run.log` 尾部；省略 `run-id` 时默认选最近任务（优先最新 running，否则最新任务），输出会先显示 `Run ID` / `Status` 头部
+- `tail [run-id] [-n <count>] [-f]`：查看某个 run 的 `run.log` 尾部；省略 `run-id` 时默认选最近任务（优先最新 running，否则最新任务），输出会先显示 `Run ID` / `Status` 头部；默认会过滤 wrapper 自身的 `[wrapper] ...` 内部日志，可通过 `--include-wrapper` 显式打开
 
 ## 结果文件与运行状态
 
@@ -337,7 +337,7 @@ runs/<runId>/agent-report.json
 
 ### 其它产物
 
-- `run.log`：完整原始执行日志
+- `run.log`：完整原始执行日志；其中凡是 wrapper 自己写入的内部运行日志，约定统一以 `[wrapper]` 开头，便于 `tail` 与后续工具可靠过滤或显式展示
 - `agent-summary.txt`：agent 留下的人类可读总结（如有）
 - `agent-report.json`：agent 留下的结构化报告（如有）
 
