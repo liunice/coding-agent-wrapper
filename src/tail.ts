@@ -14,11 +14,25 @@ import type { RunResult, RunStatusSnapshot, TailCliOptions } from "./types";
 /** Poll interval for follow mode when checking for appended log content. */
 const FOLLOW_POLL_INTERVAL_MS = 500;
 
+/** Allows probes to exercise the interactive TTY path without a real terminal. */
+const FORCE_TTY_ENV = "CODING_AGENT_WRAPPER_TAIL_FORCE_TTY";
+
+/** Prefix used by wrapper-internal log lines. */
+const WRAPPER_LOG_PREFIX = "[wrapper]";
+
+/** Placeholder shown when filtering hides every visible line in TTY mode. */
+const FILTERED_TTY_PLACEHOLDER =
+  "(暂无可见日志；当前已隐藏 [wrapper] 行，使用 --include-wrapper 查看。)";
+
+/** Placeholder shown when no log lines exist yet in TTY mode. */
+const EMPTY_TTY_PLACEHOLDER = "(暂无日志输出。)";
+
 /** Matches the sortable timestamp prefix embedded in normal run ids. */
 const RUN_ID_TIMESTAMP_PATTERN = /^(\d{14})(?:-|$)/;
 
 interface ResolvedTailTarget {
   runId: string;
+  runDir: string;
   logPath: string;
   statusText: string;
 }
@@ -32,19 +46,53 @@ interface RunCandidate {
   isRunning: boolean;
 }
 
+interface TailSnapshot {
+  fileSize: number;
+  trailingPartialLine: string;
+  frame: string;
+}
+
+interface ParsedLogContent {
+  completeLines: string[];
+  trailingPartialLine: string;
+  displayLines: string[];
+}
+
+interface StreamingFilterState {
+  includeWrapper: boolean;
+  trailingPartialLine: string;
+}
+
 /** Runs the `tail` subcommand against one wrapper run log. */
 export async function tailRunLog(options: TailCliOptions): Promise<number> {
   const target = await resolveTailTarget(options);
-  writeHeader(target);
+  const useInteractiveFollow = shouldUseInteractiveFollow(options);
+  const isTtyOutput = isTailTtyOutput();
 
-  const { fileSize, text } = await readLastLines(target.logPath, options.lines);
-  writeOutput(text);
+  const initialSnapshot = await readTailSnapshot(
+    target,
+    options,
+    useInteractiveFollow || isTtyOutput,
+  );
+  writeOutput(initialSnapshot.frame);
 
   if (!options.follow) {
     return 0;
   }
 
-  await followLogFile(target.logPath, fileSize);
+  if (useInteractiveFollow) {
+    await followLogFileWithTty(target, options, initialSnapshot.frame);
+    return 0;
+  }
+
+  await followLogFileNonTty(
+    target.logPath,
+    initialSnapshot.fileSize,
+    createStreamingFilterState(
+      options.includeWrapper,
+      initialSnapshot.trailingPartialLine,
+    ),
+  );
   return 0;
 }
 
@@ -62,15 +110,11 @@ async function resolveTailTarget(
     throw new Error(`Run log not found for runId ${runId}: ${logPath}`);
   }
 
-  const [status, result] = await Promise.all([
-    readRunStatus(path.join(runDir, "status.json")),
-    readRunResult(path.join(runDir, "result.json")),
-  ]);
-
   return {
     runId,
+    runDir,
     logPath,
-    statusText: formatRunStatus(status, result),
+    statusText: await readTailStatusText(runDir),
   };
 }
 
@@ -232,61 +276,60 @@ async function readRunResult(filePath: string): Promise<RunResult | null> {
   }
 }
 
-/** Writes the required run metadata header before any tailed log content. */
-function writeHeader(target: ResolvedTailTarget): void {
-  process.stdout.write(
-    `Run ID: ${target.runId}\nStatus: ${target.statusText}\n\n`,
+/** Reads the live header status text for one run. */
+async function readTailStatusText(runDir: string): Promise<string> {
+  const [status, result] = await Promise.all([
+    readRunStatus(path.join(runDir, "status.json")),
+    readRunResult(path.join(runDir, "result.json")),
+  ]);
+  return formatRunStatus(status, result);
+}
+
+/** Reads the current tail snapshot after wrapper filtering and line selection. */
+async function readTailSnapshot(
+  target: ResolvedTailTarget,
+  options: TailCliOptions,
+  isTtyOutput: boolean,
+): Promise<TailSnapshot> {
+  const [stats, content, statusText] = await Promise.all([
+    stat(target.logPath),
+    readFile(target.logPath, "utf8"),
+    readTailStatusText(target.runDir).catch(() => target.statusText),
+  ]);
+  const parsed = parseLogContent(content);
+  const visibleLines = filterVisibleLines(
+    parsed.displayLines,
+    options.includeWrapper,
   );
+  const selectedLines = visibleLines.slice(-options.lines);
+  const bodyLines =
+    selectedLines.length > 0
+      ? selectedLines
+      : buildTtyPlaceholderLines(
+          parsed.displayLines,
+          visibleLines,
+          options,
+          isTtyOutput,
+        );
+
+  return {
+    fileSize: stats.size,
+    trailingPartialLine: parsed.trailingPartialLine,
+    frame: `${buildHeaderText(target.runId, statusText)}${renderBodyLines(bodyLines)}`,
+  };
 }
 
-/** Reads the last N lines without depending on the system tail binary. */
-async function readLastLines(
-  filePath: string,
-  lineCount: number,
-): Promise<{ fileSize: number; text: string }> {
-  const file = await open(filePath, "r");
-
-  try {
-    const stats = await file.stat();
-    const fileSize = stats.size;
-
-    if (fileSize === 0) {
-      return { fileSize, text: "" };
-    }
-
-    const chunkSize = 64 * 1024;
-    let position = fileSize;
-    let bufferedText = "";
-    let newlineCount = 0;
-
-    while (position > 0 && newlineCount <= lineCount) {
-      const bytesToRead = Math.min(chunkSize, position);
-      position -= bytesToRead;
-      const buffer = Buffer.alloc(bytesToRead);
-      const { bytesRead } = await file.read(buffer, 0, bytesToRead, position);
-      const chunk = buffer.subarray(0, bytesRead).toString("utf8");
-      bufferedText = `${chunk}${bufferedText}`;
-      newlineCount = countNewlines(bufferedText);
-    }
-
-    return {
-      fileSize,
-      text: selectLastLines(bufferedText, lineCount),
-    };
-  } finally {
-    await file.close();
-  }
-}
-
-/** Follows appended file content until the user interrupts the command. */
-async function followLogFile(
+/** Follows appended file content in non-TTY mode while preserving append semantics. */
+async function followLogFileNonTty(
   filePath: string,
   initialOffset: number,
+  state: StreamingFilterState,
 ): Promise<void> {
   let currentOffset = initialOffset;
 
   await new Promise<void>((resolve, reject) => {
     let stopped = false;
+    let polling = false;
 
     const stopFollowing = (): void => {
       if (stopped) {
@@ -305,16 +348,86 @@ async function followLogFile(
     };
 
     const timer = setInterval(() => {
+      if (polling || stopped) {
+        return;
+      }
+
+      polling = true;
       void readAppendedContent(filePath, currentOffset)
-        .then(({ nextOffset, text }) => {
+        .then(({ nextOffset, text, resetState }) => {
           currentOffset = nextOffset;
-          writeOutput(text);
+          writeOutput(consumeFilteredAppendChunk(state, text, resetState));
         })
         .catch((error: unknown) => {
           clearInterval(timer);
           process.off("SIGINT", handleSignal);
           process.off("SIGTERM", handleSignal);
           reject(error);
+        })
+        .finally(() => {
+          polling = false;
+        });
+    }, FOLLOW_POLL_INTERVAL_MS);
+
+    process.on("SIGINT", handleSignal);
+    process.on("SIGTERM", handleSignal);
+  });
+}
+
+/** Follows one log file in TTY mode by redrawing a fixed visible region. */
+async function followLogFileWithTty(
+  target: ResolvedTailTarget,
+  options: TailCliOptions,
+  initialFrame: string,
+): Promise<void> {
+  let lastFrame = initialFrame;
+  let renderedLineCount = countRenderedLines(initialFrame);
+
+  await new Promise<void>((resolve, reject) => {
+    let stopped = false;
+    let polling = false;
+
+    const stopFollowing = (): void => {
+      if (stopped) {
+        return;
+      }
+
+      stopped = true;
+      clearInterval(timer);
+      process.off("SIGINT", handleSignal);
+      process.off("SIGTERM", handleSignal);
+      resolve();
+    };
+
+    const handleSignal = (): void => {
+      stopFollowing();
+    };
+
+    const timer = setInterval(() => {
+      if (polling || stopped) {
+        return;
+      }
+
+      polling = true;
+      void readTailSnapshot(target, options, true)
+        .then((snapshot) => {
+          if (snapshot.frame === lastFrame) {
+            return;
+          }
+
+          const prefix = buildTtyRedrawPrefix(renderedLineCount);
+          process.stdout.write(`${prefix}${snapshot.frame}`);
+          lastFrame = snapshot.frame;
+          renderedLineCount = countRenderedLines(snapshot.frame);
+        })
+        .catch((error: unknown) => {
+          clearInterval(timer);
+          process.off("SIGINT", handleSignal);
+          process.off("SIGTERM", handleSignal);
+          reject(error);
+        })
+        .finally(() => {
+          polling = false;
         });
     }, FOLLOW_POLL_INTERVAL_MS);
 
@@ -327,17 +440,25 @@ async function followLogFile(
 async function readAppendedContent(
   filePath: string,
   offset: number,
-): Promise<{ nextOffset: number; text: string }> {
+): Promise<{ nextOffset: number; text: string; resetState: boolean }> {
   const stats = await stat(filePath);
   if (stats.size <= offset) {
     if (stats.size < offset) {
-      return await readAppendedRange(filePath, 0, stats.size);
+      const range = await readAppendedRange(filePath, 0, stats.size);
+      return {
+        ...range,
+        resetState: true,
+      };
     }
 
-    return { nextOffset: offset, text: "" };
+    return { nextOffset: offset, text: "", resetState: false };
   }
 
-  return await readAppendedRange(filePath, offset, stats.size);
+  const range = await readAppendedRange(filePath, offset, stats.size);
+  return {
+    ...range,
+    resetState: false,
+  };
 }
 
 /** Reads a byte range from the file and returns the new follow offset. */
@@ -365,23 +486,140 @@ async function readAppendedRange(
   }
 }
 
-/** Counts line breaks in a UTF-8 string. */
-function countNewlines(value: string): number {
-  return (value.match(/\n/g) ?? []).length;
+/** Parses log content into complete lines plus one possible trailing partial line. */
+function parseLogContent(content: string): ParsedLogContent {
+  const endsWithNewline = content.endsWith("\n");
+  const rawLines = content.split(/\r?\n/);
+
+  if (endsWithNewline) {
+    const completeLines = rawLines.slice(0, -1);
+    return {
+      completeLines,
+      trailingPartialLine: "",
+      displayLines: completeLines,
+    };
+  }
+
+  const trailingPartialLine = rawLines.pop() ?? "";
+  return {
+    completeLines: rawLines,
+    trailingPartialLine,
+    displayLines: trailingPartialLine
+      ? [...rawLines, trailingPartialLine]
+      : rawLines,
+  };
 }
 
-/** Selects the last N logical lines while preserving their trailing newline. */
-function selectLastLines(value: string, lineCount: number): string {
-  const endsWithNewline = value.endsWith("\n");
-  const rawLines = value.split(/\r?\n/);
-  const lines = endsWithNewline ? rawLines.slice(0, -1) : rawLines;
-  const selected = lines.slice(-lineCount).join("\n");
+/** Filters wrapper-internal lines before line selection. */
+function filterVisibleLines(
+  lines: string[],
+  includeWrapper: boolean,
+): string[] {
+  if (includeWrapper) {
+    return lines;
+  }
 
-  if (!selected) {
+  return lines.filter((line) => !line.startsWith(WRAPPER_LOG_PREFIX));
+}
+
+/** Creates the streaming filter state used by non-TTY follow mode. */
+function createStreamingFilterState(
+  includeWrapper: boolean,
+  trailingPartialLine: string,
+): StreamingFilterState {
+  return {
+    includeWrapper,
+    trailingPartialLine,
+  };
+}
+
+/** Filters appended chunks line-by-line while keeping non-TTY output append-based. */
+function consumeFilteredAppendChunk(
+  state: StreamingFilterState,
+  chunk: string,
+  resetState: boolean,
+): string {
+  if (!chunk) {
+    if (resetState) {
+      state.trailingPartialLine = "";
+    }
     return "";
   }
 
-  return endsWithNewline ? `${selected}\n` : selected;
+  const parsed = parseLogContent(
+    `${resetState ? "" : state.trailingPartialLine}${chunk}`,
+  );
+  state.trailingPartialLine = parsed.trailingPartialLine;
+
+  const visibleLines = filterVisibleLines(
+    parsed.completeLines,
+    state.includeWrapper,
+  );
+  return renderBodyLines(visibleLines);
+}
+
+/** Builds TTY placeholder lines when no visible body lines remain. */
+function buildTtyPlaceholderLines(
+  rawDisplayLines: string[],
+  visibleLines: string[],
+  options: TailCliOptions,
+  isTtyOutput: boolean,
+): string[] {
+  if (!isTtyOutput) {
+    return [];
+  }
+
+  if (
+    rawDisplayLines.length > 0 &&
+    visibleLines.length === 0 &&
+    !options.includeWrapper
+  ) {
+    return [FILTERED_TTY_PLACEHOLDER];
+  }
+
+  if (rawDisplayLines.length === 0) {
+    return [EMPTY_TTY_PLACEHOLDER];
+  }
+
+  return [];
+}
+
+/** Builds the stable tail header text. */
+function buildHeaderText(runId: string, statusText: string): string {
+  return `Run ID: ${runId}\nStatus: ${statusText}\n\n`;
+}
+
+/** Renders selected body lines with a trailing newline when non-empty. */
+function renderBodyLines(lines: string[]): string {
+  if (lines.length === 0) {
+    return "";
+  }
+
+  return `${lines.join("\n")}\n`;
+}
+
+/** Counts the number of rendered terminal lines in one frame. */
+function countRenderedLines(frame: string): number {
+  return (frame.match(/\n/g) ?? []).length;
+}
+
+/** Builds the ANSI prefix that redraws the previous frame in place. */
+function buildTtyRedrawPrefix(renderedLineCount: number): string {
+  if (renderedLineCount <= 0) {
+    return "";
+  }
+
+  return `\u001b[${renderedLineCount}A\r\u001b[J`;
+}
+
+/** Returns whether tail output should use the interactive TTY follow path. */
+function shouldUseInteractiveFollow(options: TailCliOptions): boolean {
+  return options.follow && isTailTtyOutput();
+}
+
+/** Returns whether tail should treat stdout as a TTY for rendering purposes. */
+function isTailTtyOutput(): boolean {
+  return Boolean(process.stdout.isTTY) || process.env[FORCE_TTY_ENV] === "1";
 }
 
 /** Writes log output chunks without adding extra formatting. */

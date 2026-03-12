@@ -1,5 +1,5 @@
 /**
- * Verifies the wrapper-native tail command in explicit, latest, and follow modes.
+ * Verifies the wrapper-native tail command in filtered, explicit, and follow modes.
  * Important note: it uses temporary run directories so the probe stays lightweight.
  */
 
@@ -7,6 +7,9 @@ import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { appendFile, mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+
+/** Internal env override used to force the TTY redraw path during probes. */
+const FORCE_TTY_ENV = "CODING_AGENT_WRAPPER_TAIL_FORCE_TTY";
 
 /** Runs the tail probe and prints a compact PASS message. */
 async function main(): Promise<void> {
@@ -23,7 +26,13 @@ async function main(): Promise<void> {
   try {
     await createRunFixture(outputRoot, {
       runId: "20260311100000-explicit-success",
-      logLines: ["alpha 1", "alpha 2", "alpha 3"],
+      logLines: [
+        "alpha 1",
+        "[wrapper] alpha wrapper 1",
+        "alpha 2",
+        "[wrapper] alpha wrapper 2",
+        "alpha 3",
+      ],
       status: "success",
       phase: "completed",
       resultStatus: "success",
@@ -32,7 +41,7 @@ async function main(): Promise<void> {
     });
     await createRunFixture(outputRoot, {
       runId: "20260311113000-latest-running",
-      logLines: ["beta 1", "beta 2", "beta 3", "beta 4"],
+      logLines: ["beta 1", "[wrapper] beta wrapper 1", "beta 3"],
       status: "running",
       phase: "running",
       resultStatus: "running",
@@ -40,8 +49,17 @@ async function main(): Promise<void> {
       startedAt: "2026-03-11T11:30:00.000Z",
     });
     await createRunFixture(outputRoot, {
+      runId: "20260311114500-wrapper-only-running",
+      logLines: ["[wrapper] hidden 1", "[wrapper] hidden 2"],
+      status: "running",
+      phase: "running",
+      resultStatus: "running",
+      exitCode: null,
+      startedAt: "2026-03-11T11:45:00.000Z",
+    });
+    await createRunFixture(outputRoot, {
       runId: "20260311120000-newer-finished",
-      logLines: ["gamma 1", "gamma 2"],
+      logLines: ["gamma 1", "[wrapper] gamma wrapper"],
       status: "success",
       phase: "completed",
       resultStatus: "success",
@@ -49,10 +67,13 @@ async function main(): Promise<void> {
       startedAt: "2026-03-11T12:00:00.000Z",
     });
 
-    verifyExplicitRunId(cliPath, outputRoot);
+    verifyDefaultWrapperExclusion(cliPath, outputRoot);
+    verifyExplicitIncludeWrapper(cliPath, outputRoot);
+    verifyExplicitExcludeWrapper(cliPath, outputRoot);
     verifyLatestRunning(cliPath, outputRoot);
     await verifyLatestOverallFallback(cliPath, workspace);
-    await verifyFollowHeader(cliPath, outputRoot);
+    await verifyNonTtyFollowAppend(cliPath, outputRoot);
+    await verifyForcedTtyFollowRedraw(cliPath, outputRoot);
 
     process.stdout.write("tail probe: PASS\n");
   } finally {
@@ -174,8 +195,11 @@ async function createRunFixture(
   return path.join(runDir, "run.log");
 }
 
-/** Verifies explicit run-id tailing keeps the requested run and header format. */
-function verifyExplicitRunId(cliPath: string, outputRoot: string): void {
+/** Verifies wrapper lines are excluded by default before selecting the last N lines. */
+function verifyDefaultWrapperExclusion(
+  cliPath: string,
+  outputRoot: string,
+): void {
   const tailResult = spawnSync(
     process.execPath,
     [
@@ -204,18 +228,79 @@ function verifyExplicitRunId(cliPath: string, outputRoot: string): void {
   );
 }
 
-/** Verifies the implicit latest-run lookup prefers the newest running run. */
-function verifyLatestRunning(cliPath: string, outputRoot: string): void {
+/** Verifies wrapper lines can be included again explicitly for debugging. */
+function verifyExplicitIncludeWrapper(
+  cliPath: string,
+  outputRoot: string,
+): void {
   const tailResult = spawnSync(
     process.execPath,
-    [cliPath, "tail", "-n", "2", "--output-root", outputRoot],
+    [
+      cliPath,
+      "tail",
+      "20260311100000-explicit-success",
+      "-n",
+      "2",
+      "--include-wrapper",
+      "--output-root",
+      outputRoot,
+    ],
     { encoding: "utf8" },
   );
 
   assert.equal(tailResult.status, 0, tailResult.stderr || tailResult.stdout);
-  assert.match(tailResult.stdout, /^Run ID: 20260311113000-latest-running\n/);
+  assert.equal(
+    tailResult.stdout,
+    [
+      "Run ID: 20260311100000-explicit-success",
+      "Status: success (exit 0)",
+      "",
+      "[wrapper] alpha wrapper 2",
+      "alpha 3",
+      "",
+    ].join("\n"),
+  );
+}
+
+/** Verifies the explicit exclusion flag matches the default hidden-wrapper behavior. */
+function verifyExplicitExcludeWrapper(
+  cliPath: string,
+  outputRoot: string,
+): void {
+  const tailResult = spawnSync(
+    process.execPath,
+    [
+      cliPath,
+      "tail",
+      "20260311100000-explicit-success",
+      "-n",
+      "2",
+      "--exclude-wrapper",
+      "--output-root",
+      outputRoot,
+    ],
+    { encoding: "utf8" },
+  );
+
+  assert.equal(tailResult.status, 0, tailResult.stderr || tailResult.stdout);
+  assert.match(tailResult.stdout, /alpha 2\nalpha 3\n$/);
+  assert.doesNotMatch(tailResult.stdout, /\[wrapper\]/);
+}
+
+/** Verifies the implicit latest-run lookup prefers the newest running run. */
+function verifyLatestRunning(cliPath: string, outputRoot: string): void {
+  const tailResult = spawnSync(
+    process.execPath,
+    [cliPath, "tail", "-n", "1", "--output-root", outputRoot],
+    { encoding: "utf8" },
+  );
+
+  assert.equal(tailResult.status, 0, tailResult.stderr || tailResult.stdout);
+  assert.match(
+    tailResult.stdout,
+    /^Run ID: 20260311114500-wrapper-only-running\n/,
+  );
   assert.match(tailResult.stdout, /Status: running\n\n/);
-  assert.match(tailResult.stdout, /beta 3\nbeta 4\n$/);
 }
 
 /** Verifies the implicit lookup falls back to the newest overall run when none run. */
@@ -235,7 +320,7 @@ async function verifyLatestOverallFallback(
   });
   await createRunFixture(fallbackRoot, {
     runId: "20260311150000-finished-latest",
-    logLines: ["epsilon 1"],
+    logLines: ["epsilon 1", "[wrapper] epsilon 2"],
     status: "failed",
     phase: "failed",
     resultStatus: "failed",
@@ -255,8 +340,8 @@ async function verifyLatestOverallFallback(
   assert.match(tailResult.stdout, /epsilon 1\n$/);
 }
 
-/** Verifies follow mode prints the header first, then streams appended lines. */
-async function verifyFollowHeader(
+/** Verifies non-TTY follow mode still appends visible lines without ANSI redraw codes. */
+async function verifyNonTtyFollowAppend(
   cliPath: string,
   outputRoot: string,
 ): Promise<void> {
@@ -267,7 +352,16 @@ async function verifyFollowHeader(
   );
   const child = spawn(
     process.execPath,
-    [cliPath, "tail", "-n", "1", "-f", "--output-root", outputRoot],
+    [
+      cliPath,
+      "tail",
+      "20260311113000-latest-running",
+      "-n",
+      "1",
+      "-f",
+      "--output-root",
+      outputRoot,
+    ],
     { stdio: ["ignore", "pipe", "pipe"] },
   );
 
@@ -281,27 +375,82 @@ async function verifyFollowHeader(
   });
 
   await sleep(700);
-  await appendFile(logPath, "beta 5\n", "utf8");
+  await appendFile(logPath, "[wrapper] beta wrapper 2\n", "utf8");
   await sleep(700);
-  await appendFile(logPath, "beta 6\n", "utf8");
-  await sleep(400);
+  await appendFile(logPath, "beta 4\n", "utf8");
+  await sleep(700);
+  await appendFile(logPath, "[wrapper] beta wrapper 3\nbeta 5\n", "utf8");
+  await sleep(500);
   child.kill("SIGINT");
 
-  const exited = await new Promise<number | null>((resolve, reject) => {
-    child.on("exit", (code) => {
-      resolve(code);
-    });
-    child.on("error", (error) => {
-      reject(error);
-    });
-  });
+  const exited = await waitForExit(child);
 
   assert.equal(exited, 0, stderr || stdout);
   assert.match(stdout, /^Run ID: 20260311113000-latest-running\n/);
   assert.match(stdout, /Status: running\n\n/);
+  assert.match(stdout, /beta 3\n/);
   assert.match(stdout, /beta 4\n/);
   assert.match(stdout, /beta 5\n/);
-  assert.match(stdout, /beta 6\n/);
+  assert.equal(stdout.includes("\u001b["), false);
+  assert.doesNotMatch(stdout, /beta wrapper 2|beta wrapper 3/);
+}
+
+/** Verifies forced TTY follow mode redraws a fixed region and shows the filtered placeholder. */
+async function verifyForcedTtyFollowRedraw(
+  cliPath: string,
+  outputRoot: string,
+): Promise<void> {
+  const logPath = path.join(
+    outputRoot,
+    "20260311114500-wrapper-only-running",
+    "run.log",
+  );
+  const child = spawn(
+    process.execPath,
+    [
+      cliPath,
+      "tail",
+      "20260311114500-wrapper-only-running",
+      "-n",
+      "2",
+      "-f",
+      "--output-root",
+      outputRoot,
+    ],
+    {
+      stdio: ["ignore", "pipe", "pipe"],
+      env: {
+        ...process.env,
+        [FORCE_TTY_ENV]: "1",
+      },
+    },
+  );
+
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (chunk: Buffer) => {
+    stdout += chunk.toString();
+  });
+  child.stderr.on("data", (chunk: Buffer) => {
+    stderr += chunk.toString();
+  });
+
+  await sleep(700);
+  await appendFile(logPath, "[wrapper] hidden 3\n", "utf8");
+  await sleep(700);
+  await appendFile(logPath, "visible 1\n", "utf8");
+  await sleep(700);
+  child.kill("SIGINT");
+
+  const exited = await waitForExit(child);
+
+  assert.equal(exited, 0, stderr || stdout);
+  assert.match(stdout, /^Run ID: 20260311114500-wrapper-only-running\n/);
+  assert.match(stdout, /暂无可见日志；当前已隐藏 \[wrapper\] 行/u);
+  assert.match(stdout, /visible 1\n/);
+  assert.equal(stdout.includes("\u001b["), true);
+  assert.equal(stdout.includes("\u001b[J"), true);
+  assert.doesNotMatch(stdout, /hidden 1|hidden 2|hidden 3/);
 }
 
 /** Removes stale probe workspaces so repository lint does not pick them up later. */
@@ -317,6 +466,20 @@ async function cleanupProbeWorkspaces(repoRoot: string): Promise<void> {
         rm(path.join(repoRoot, entry.name), { recursive: true, force: true }),
       ),
   );
+}
+
+/** Waits for one spawned child process to exit. */
+async function waitForExit(
+  child: ReturnType<typeof spawn>,
+): Promise<number | null> {
+  return await new Promise<number | null>((resolve, reject) => {
+    child.on("exit", (code) => {
+      resolve(code);
+    });
+    child.on("error", (error) => {
+      reject(error);
+    });
+  });
 }
 
 /** Sleeps briefly while the probe waits for follow-mode output. */

@@ -63,6 +63,7 @@ export interface TailCliOptions extends BaseCliOptions {
   runId?: string;
   lines: number;
   follow: boolean;
+  includeWrapper: boolean;
 }
 
 /** Describes CLI options after parsing and normalization. */

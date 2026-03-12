@@ -117,6 +117,7 @@ function parseCliArgs(argv: string[]): CliOptions | null {
   let notifyThreadId: string | undefined;
   let tailLines = 10;
   let follow = false;
+  let includeWrapper = false;
   const passthroughArgs: string[] = [];
 
   for (let index = 0; index < args.length; index += 1) {
@@ -211,6 +212,12 @@ function parseCliArgs(argv: string[]): CliOptions | null {
       case "-f":
       case "--follow":
         follow = true;
+        break;
+      case "--include-wrapper":
+        includeWrapper = true;
+        break;
+      case "--exclude-wrapper":
+        includeWrapper = false;
         break;
       case "--detach":
         detach = true;
@@ -327,6 +334,7 @@ function parseCliArgs(argv: string[]): CliOptions | null {
       runId,
       lines: tailLines,
       follow,
+      includeWrapper,
       label,
       detach,
       outputRoot,
@@ -395,7 +403,7 @@ function readRequiredValue(flag: string, value: string | undefined): string {
 /** Prints the short usage guide for the wrapper CLI. */
 function printUsage(): void {
   process.stdout.write(
-    "coding-agent-wrapper\n\nUsage:\n  node dist/cli.js run --agent <codex|claude> --cwd <path> --task <text> [--label <text>] [--detach] [--new-session] [--progress-every-seconds <n>] [--progress-start-after-seconds <n>] [--output-root <path>] [--notify-session-key <key>] [--notify-channel <name> --notify-target <id> [--notify-account <id>] [--notify-reply-to <id>] [--notify-thread-id <id>]] [-- ...passthrough]\n  node dist/cli.js stop --run-id <id> [--output-root <path>]\n  node dist/cli.js runs [--output-root <path>]\n  node dist/cli.js show --run-id <id> [--output-root <path>]\n  node dist/cli.js tail [run-id] [-n <count>] [-f] [--output-root <path>]\n",
+    "coding-agent-wrapper\n\nUsage:\n  node dist/cli.js run --agent <codex|claude> --cwd <path> --task <text> [--label <text>] [--detach] [--new-session] [--progress-every-seconds <n>] [--progress-start-after-seconds <n>] [--output-root <path>] [--notify-session-key <key>] [--notify-channel <name> --notify-target <id> [--notify-account <id>] [--notify-reply-to <id>] [--notify-thread-id <id>]] [-- ...passthrough]\n  node dist/cli.js stop --run-id <id> [--output-root <path>]\n  node dist/cli.js runs [--output-root <path>]\n  node dist/cli.js show --run-id <id> [--output-root <path>]\n  node dist/cli.js tail [run-id] [-n <count>] [-f] [--include-wrapper|--exclude-wrapper] [--output-root <path>]\n",
   );
 }
 
