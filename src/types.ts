@@ -95,6 +95,7 @@ export interface RunContext {
   runId: string;
   runDir: string;
   logPath: string;
+  agentActivityPath: string;
   resultPath: string;
   statusPath: string;
   summaryPath: string;
@@ -114,6 +115,12 @@ export interface AgentReport {
   validationSummary?: string | null;
   notes?: string | null;
   commitId?: string | null;
+}
+
+/** Captures the latest agent-originated activity for progress reporting. */
+export interface AgentActivitySnapshot {
+  updatedAt: string;
+  summary: string | null;
 }
 
 export interface RunResult {

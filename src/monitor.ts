@@ -5,6 +5,7 @@
 
 import { open } from "node:fs/promises";
 
+import { readAgentActivity } from "./activity";
 import { sendProgressNotification } from "./reporter";
 import { patchRunStatus, readRunStatus } from "./status";
 import type { RunCliOptions, RunContext, RunStatusSnapshot } from "./types";
@@ -83,9 +84,10 @@ export function startProgressMonitor(
 
     sending = true;
     try {
-      const recentActivity = await readRecentMeaningfulActivity(
-        context.logPath,
-      );
+      const recentActivity =
+        options.agent === "claude"
+          ? await readAgentActivity(context.agentActivityPath)
+          : await readRecentMeaningfulActivity(context.logPath);
       const text = buildProgressText(
         options,
         context,
@@ -164,13 +166,21 @@ function buildProgressText(
   context: RunContext,
   status: RunStatusSnapshot,
   elapsedSeconds: number,
-  recentActivity: string | null,
+  recentActivity:
+    | {
+        updatedAt: string;
+        summary: string | null;
+      }
+    | string
+    | null,
 ): string {
   const elapsedMinutes = (elapsedSeconds / 60).toFixed(1);
   const name = options.label ?? context.runId;
-  const progressSummaryLines = recentActivity
-    ? recentActivity.split("\n").filter(Boolean)
-    : [status.summary];
+  const progressSummaryLines = resolveProgressSummaryLines(
+    options,
+    status,
+    recentActivity,
+  );
 
   return [
     `后台任务进行中：${name}`,
@@ -197,6 +207,56 @@ function buildProgressText(
     `• 状态文件: ${formatRunArtifactPath(context.runId, context.statusPath)}`,
     `• 日志文件: ${formatRunArtifactPath(context.runId, context.logPath)}`,
   ].join("\n");
+}
+
+function resolveProgressSummaryLines(
+  options: RunCliOptions,
+  status: RunStatusSnapshot,
+  recentActivity:
+    | {
+        updatedAt: string;
+        summary: string | null;
+      }
+    | string
+    | null,
+): string[] {
+  if (options.agent !== "claude") {
+    if (typeof recentActivity === "string" && recentActivity.trim()) {
+      return recentActivity.split("\n").filter(Boolean);
+    }
+    return [status.summary];
+  }
+
+  if (!recentActivity || typeof recentActivity === "string") {
+    return [
+      "尚未收到 Claude agent 活动。",
+      `当前 wrapper 状态：${status.summary}`,
+    ];
+  }
+
+  const ageSeconds = calculateAgeSeconds(recentActivity.updatedAt);
+  const ageText = formatElapsedAge(ageSeconds);
+  const staleAfterSeconds = Math.max(
+    90,
+    (options.progressEverySeconds ?? 60) * 2,
+  );
+
+  if (ageSeconds !== null && ageSeconds > staleAfterSeconds) {
+    return [
+      `Claude 仍在运行，但最近 ${ageText} 没有新的 agent 输出。`,
+      `最近一次活动：${formatDisplayTime(recentActivity.updatedAt)}`,
+      recentActivity.summary
+        ? `活动摘要：${recentActivity.summary}`
+        : `当前 wrapper 状态：${status.summary}`,
+    ];
+  }
+
+  return [
+    `最近 Claude 活动：${ageText}前`,
+    recentActivity.summary
+      ? `活动摘要：${recentActivity.summary}`
+      : `当前 wrapper 状态：${status.summary}`,
+  ];
 }
 
 async function readRecentMeaningfulActivity(
@@ -234,6 +294,31 @@ async function readRecentMeaningfulActivity(
   } finally {
     await handle?.close();
   }
+}
+
+function calculateAgeSeconds(value: string): number | null {
+  const timestampMs = Date.parse(value);
+  if (!Number.isFinite(timestampMs)) {
+    return null;
+  }
+
+  return Math.max(0, Math.floor((Date.now() - timestampMs) / 1000));
+}
+
+function formatElapsedAge(seconds: number | null): string {
+  if (seconds === null) {
+    return "未知";
+  }
+
+  if (seconds < 60) {
+    return `${seconds} 秒`;
+  }
+
+  if (seconds < 3600) {
+    return `${(seconds / 60).toFixed(1)} 分钟`;
+  }
+
+  return `${(seconds / 3600).toFixed(1)} 小时`;
 }
 
 function isIgnorableLogFragment(line: string): boolean {

@@ -9,7 +9,12 @@ import { createWriteStream } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
+import { writeAgentActivity } from "./activity";
 import { createAgentLaunchSpec } from "./adapters";
+import {
+  consumeClaudeStreamChunk,
+  createClaudeStreamState,
+} from "./claude-stream";
 import { startProgressMonitor } from "./monitor";
 import { sendCompletionNotification } from "./reporter";
 import {
@@ -39,6 +44,9 @@ import type {
 /** Limits how much stdout/stderr is kept in memory for summary extraction. */
 const MAX_CAPTURED_OUTPUT = 256 * 1024;
 
+/** Limits how often Claude agent activity is flushed to disk during streaming. */
+const CLAUDE_ACTIVITY_FLUSH_INTERVAL_MS = 2000;
+
 /** Creates or resolves all filesystem paths needed for a single run. */
 export async function createRunContext(
   options: RunCliOptions,
@@ -48,6 +56,7 @@ export async function createRunContext(
     options.runId ?? buildRunId(options.agent, options.label, startedAt);
   const runDir = path.resolve(options.outputRoot, runId);
   const logPath = path.join(runDir, "run.log");
+  const agentActivityPath = path.join(runDir, "agent-activity.json");
   const resultPath = path.join(runDir, "result.json");
   const statusPath = path.join(runDir, "status.json");
   const summaryPath = path.join(runDir, "agent-summary.txt");
@@ -59,6 +68,7 @@ export async function createRunContext(
     runId,
     runDir,
     logPath,
+    agentActivityPath,
     resultPath,
     statusPath,
     summaryPath,
@@ -310,9 +320,53 @@ export async function executeRun(
       let capturedStdout = "";
       let capturedStderr = "";
       const sessionDetection = createSessionDetectionState();
+      const claudeStreamState =
+        options.agent === "claude" ? createClaudeStreamState() : null;
 
       let lastPersistedSessionId: string | null = null;
       let lastStatusHeartbeatAt = Date.now();
+      let lastActivityFlushAtMs = 0;
+      let lastPersistedActivityAt: string | null = null;
+      let lastPersistedActivitySummary: string | null = null;
+      let activityWriteChain = Promise.resolve();
+
+      const flushClaudeActivity = (force = false): void => {
+        if (!claudeStreamState?.latestActivityAt) {
+          return;
+        }
+
+        const summary = claudeStreamState.latestActivitySummary ?? null;
+        const activityChanged =
+          claudeStreamState.latestActivityAt !== lastPersistedActivityAt;
+        const summaryChanged = summary !== lastPersistedActivitySummary;
+        const flushDue =
+          Date.now() - lastActivityFlushAtMs >=
+          CLAUDE_ACTIVITY_FLUSH_INTERVAL_MS;
+
+        if (!force && !summaryChanged && !activityChanged) {
+          return;
+        }
+
+        if (!force && !summaryChanged && !flushDue) {
+          return;
+        }
+
+        lastActivityFlushAtMs = Date.now();
+        lastPersistedActivityAt = claudeStreamState.latestActivityAt;
+        lastPersistedActivitySummary = summary;
+        activityWriteChain = activityWriteChain
+          .catch(() => undefined)
+          .then(
+            async () =>
+              await writeAgentActivity(context.agentActivityPath, {
+                updatedAt:
+                  claudeStreamState.latestActivityAt ??
+                  new Date().toISOString(),
+                summary,
+              }),
+          )
+          .catch(() => undefined);
+      };
 
       const handleChildText = (
         streamName: "stdout" | "stderr",
@@ -325,9 +379,20 @@ export async function executeRun(
         }
 
         detectSessionIdFromStream(options.agent, sessionDetection, text);
+        if (streamName === "stdout" && claudeStreamState) {
+          const claudeChunk = consumeClaudeStreamChunk(
+            claudeStreamState,
+            text,
+            options.cwd,
+          );
+          if (claudeChunk.sawActivity) {
+            flushClaudeActivity();
+          }
+        }
         activeLogStream.write(text);
 
-        const detectedSessionId = sessionDetection.sessionId;
+        const detectedSessionId =
+          sessionDetection.sessionId ?? claudeStreamState?.sessionId ?? null;
         if (detectedSessionId && detectedSessionId !== lastPersistedSessionId) {
           lastPersistedSessionId = detectedSessionId;
           void patchRunStatus(options, context, {
@@ -388,12 +453,19 @@ export async function executeRun(
       process.removeListener("SIGTERM", handleTerminationSignal);
       process.removeListener("SIGINT", handleTerminationSignal);
 
+      if (claudeStreamState?.pendingLine.trim()) {
+        consumeClaudeStreamChunk(claudeStreamState, "\n", options.cwd);
+      }
+      flushClaudeActivity(true);
+      await activityWriteChain;
+
       const status: RunStatus = cancellationRequested
         ? "cancelled"
         : exitCode === 0
           ? "success"
           : "failed";
-      let sessionId = sessionDetection.sessionId;
+      let sessionId =
+        sessionDetection.sessionId ?? claudeStreamState?.sessionId ?? null;
 
       if (!sessionId) {
         sessionId = await extractSessionIdFromRunLog(
@@ -428,7 +500,13 @@ export async function executeRun(
 
       const summary = cancellationRequested
         ? "Run cancelled by user during execution."
-        : await buildSummary(context, capturedStdout, capturedStderr, exitCode);
+        : await buildSummary(
+            context,
+            capturedStdout,
+            capturedStderr,
+            exitCode,
+            claudeStreamState?.finalResultText ?? null,
+          );
 
       const finishedAt = new Date().toISOString();
       const finalRuntimeState = {
@@ -639,13 +717,15 @@ async function buildSummary(
   capturedStdout: string,
   capturedStderr: string,
   exitCode: number,
+  explicitAgentSummary: string | null = null,
 ): Promise<string> {
   const fileSummary = await readOptionalText(context.summaryPath);
   if (fileSummary) {
     return trimSummary(fileSummary);
   }
 
-  const claudeSummary = extractClaudeSummary(capturedStdout);
+  const claudeSummary =
+    explicitAgentSummary ?? extractClaudeSummary(capturedStdout);
   if (claudeSummary) {
     return trimSummary(claudeSummary);
   }
@@ -665,6 +745,11 @@ function extractClaudeSummary(stdout: string): string | null {
   const trimmed = stdout.trim();
   if (!trimmed) {
     return null;
+  }
+
+  const streamJsonSummary = extractClaudeStreamJsonSummary(trimmed);
+  if (streamJsonSummary) {
+    return streamJsonSummary;
   }
 
   try {
@@ -701,6 +786,28 @@ function extractClaudeSummary(stdout: string): string | null {
     }
   } catch {
     return null;
+  }
+
+  return null;
+}
+
+function extractClaudeStreamJsonSummary(stdout: string): string | null {
+  for (const line of stdout.split(/\r?\n/).reverse()) {
+    if (!line.trim()) {
+      continue;
+    }
+
+    try {
+      const parsed = JSON.parse(line) as {
+        type?: unknown;
+        result?: unknown;
+      };
+      if (parsed.type === "result" && typeof parsed.result === "string") {
+        return parsed.result;
+      }
+    } catch {
+      // Ignore malformed lines while scanning NDJSON output.
+    }
   }
 
   return null;

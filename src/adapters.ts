@@ -13,8 +13,10 @@ const DEFAULT_CODEX_FLAGS = ["--dangerously-bypass-approvals-and-sandbox"];
 /** Default flags for Claude Code non-interactive local runs. */
 const DEFAULT_CLAUDE_FLAGS = [
   "-p",
+  "--verbose",
   "--output-format",
-  "json",
+  "stream-json",
+  "--include-partial-messages",
   "--dangerously-skip-permissions",
 ];
 

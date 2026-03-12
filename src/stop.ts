@@ -1,3 +1,8 @@
+/**
+ * Stops active wrapper runs and updates persisted status artifacts.
+ * Important note: cancellation prefers graceful shutdown before escalation.
+ */
+
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -95,6 +100,7 @@ function buildStopContext(
     runId,
     runDir,
     logPath: path.join(runDir, "run.log"),
+    agentActivityPath: path.join(runDir, "agent-activity.json"),
     resultPath: path.join(runDir, "result.json"),
     statusPath: path.join(runDir, "status.json"),
     summaryPath: path.join(runDir, "agent-summary.txt"),
