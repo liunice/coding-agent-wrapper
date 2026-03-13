@@ -820,11 +820,21 @@ function buildLogHeader(
   command: string,
   args: string[],
 ): string {
+  const codexApiKeyState =
+    options.agent === "codex"
+      ? process.env.CODEX_API_KEY
+        ? "present"
+        : "missing"
+      : null;
+
   return [
     `[wrapper] runId=${context.runId}`,
     `[wrapper] agent=${options.agent}`,
     `[wrapper] cwd=${options.cwd}`,
     `[wrapper] startedAt=${context.startedAt}`,
+    ...(codexApiKeyState
+      ? [`[wrapper] env.CODEX_API_KEY=${codexApiKeyState}`]
+      : []),
     `[wrapper] command=${renderCommand(command, args)}`,
     `[wrapper] taskSummary=${context.taskSummary}`,
     "",
