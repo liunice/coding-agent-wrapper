@@ -3,7 +3,6 @@
  * Important note: v1 favors a stable wrapper contract over deep agent-specific features.
  */
 
-import { getCodingAssistantSkillConfig } from "./config";
 import { getResumeSessionId } from "./sessions";
 import type { AgentLaunchSpec, RunCliOptions, RunContext } from "./types";
 
@@ -76,15 +75,13 @@ async function buildCodexLaunchSpec(
         wrappedPrompt,
       ];
 
-  const skillEnv = getCodingAssistantSkillConfig().env ?? {};
   const env = {
     ...process.env,
-    ...skillEnv,
   };
 
-  if (!env.CODEX_API_KEY) {
+  if (!process.env.CODEX_API_KEY) {
     throw new Error(
-      "Missing CODEX_API_KEY. Set it in the runtime environment or openclaw.json -> skills.entries.coding-assistant.env.CODEX_API_KEY.",
+      "Missing CODEX_API_KEY. Provide it via the runtime environment (for OpenClaw skill usage, declare metadata.openclaw.requires.env + primaryEnv and configure skills.entries.coding-assistant.apiKey or env.CODEX_API_KEY).",
     );
   }
 

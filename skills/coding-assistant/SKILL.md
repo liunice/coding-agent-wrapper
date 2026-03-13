@@ -1,6 +1,12 @@
 ---
 name: coding-assistant
 description: Run Codex or Claude Code as a managed background coding assistant with structured run artifacts, optional in-progress notifications, run status inspection, and graceful cancellation. Use when building features, refactoring code, fixing bugs, reviewing implementation plans, or running iterative coding work in a real project directory. Prefer this instead of the older coding-agent skill when you want detached execution, `result.json` / `run.log` / `status.json` artifacts, active run lookup, and completion or cancellation notifications back to Telegram or the current session. Do not use for tiny one-line edits, simple file reads, or thread-bound ACP harness requests in chat.
+metadata:
+  openclaw:
+    requires:
+      env:
+        - CODEX_API_KEY
+    primaryEnv: CODEX_API_KEY
 ---
 
 # Coding Assistant

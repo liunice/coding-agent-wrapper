@@ -22,9 +22,6 @@ interface CodingAssistantSkillConfig {
 }
 
 interface OpenClawConfigShape {
-  env?: {
-    vars?: Record<string, string>;
-  };
   skills?: {
     entries?: Record<string, CodingAssistantSkillConfig | undefined>;
   };
@@ -33,7 +30,7 @@ interface OpenClawConfigShape {
 /** Caches the resolved skill config to avoid repeated disk reads. */
 let cachedSkillConfig: CodingAssistantSkillConfig | undefined;
 
-/** Returns the merged coding-assistant config with env overrides applied. */
+/** Returns coding-assistant config used for non-secret notification defaults only. */
 export function getCodingAssistantSkillConfig(): CodingAssistantSkillConfig {
   if (cachedSkillConfig !== undefined) {
     return cachedSkillConfig ?? {};
@@ -41,24 +38,18 @@ export function getCodingAssistantSkillConfig(): CodingAssistantSkillConfig {
 
   const config = loadOpenClawConfig();
   const rawSkillConfig = config?.skills?.entries?.["coding-assistant"] ?? {};
-  const variableSources = {
-    ...(config?.env?.vars ?? {}),
-    ...process.env,
-  };
-
-  const resolvedEnv =
-    resolveStringMap(rawSkillConfig.env, variableSources) ?? {};
+  const configuredEnv = rawSkillConfig.env ?? {};
 
   cachedSkillConfig = {
-    env: resolvedEnv,
+    env: configuredEnv,
     notify: {
-      channel: process.env.NOTIFY_CHANNEL ?? resolvedEnv.NOTIFY_CHANNEL,
-      target: process.env.NOTIFY_TARGET ?? resolvedEnv.NOTIFY_TARGET,
-      accountId: process.env.NOTIFY_ACCOUNT_ID ?? resolvedEnv.NOTIFY_ACCOUNT_ID,
-      replyTo: process.env.NOTIFY_REPLY_TO ?? resolvedEnv.NOTIFY_REPLY_TO,
-      threadId: process.env.NOTIFY_THREAD_ID ?? resolvedEnv.NOTIFY_THREAD_ID,
+      channel: process.env.NOTIFY_CHANNEL ?? configuredEnv.NOTIFY_CHANNEL,
+      target: process.env.NOTIFY_TARGET ?? configuredEnv.NOTIFY_TARGET,
+      accountId: process.env.NOTIFY_ACCOUNT_ID ?? configuredEnv.NOTIFY_ACCOUNT_ID,
+      replyTo: process.env.NOTIFY_REPLY_TO ?? configuredEnv.NOTIFY_REPLY_TO,
+      threadId: process.env.NOTIFY_THREAD_ID ?? configuredEnv.NOTIFY_THREAD_ID,
       sessionKey:
-        process.env.NOTIFY_SESSION_KEY ?? resolvedEnv.NOTIFY_SESSION_KEY,
+        process.env.NOTIFY_SESSION_KEY ?? configuredEnv.NOTIFY_SESSION_KEY,
     },
   };
 
@@ -88,28 +79,3 @@ function loadOpenClawConfig(): OpenClawConfigShape | null {
   return null;
 }
 
-/** Resolves a string map with ${VAR} templates against known variables. */
-function resolveStringMap(
-  value: Record<string, string> | undefined,
-  variables: Record<string, string | undefined>,
-): Record<string, string> | undefined {
-  if (!value) {
-    return undefined;
-  }
-
-  const result: Record<string, string> = {};
-  for (const [key, raw] of Object.entries(value)) {
-    result[key] = resolveTemplate(raw, variables);
-  }
-  return result;
-}
-
-/** Replaces ${VAR} placeholders with resolved environment values. */
-function resolveTemplate(
-  value: string,
-  variables: Record<string, string | undefined>,
-): string {
-  return value.replace(/\$\{([A-Z0-9_]+)\}/g, (_match, name: string) => {
-    return variables[name] ?? "";
-  });
-}

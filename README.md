@@ -115,21 +115,20 @@ skills/coding-assistant/
 }
 ```
 
-同时，通常还需要在 `openclaw.json -> skills.entries.coding-assistant.env` 中配置这个 skill 运行所需的环境变量。常见用途包括：
+同时，通常还需要在 OpenClaw 中区分两类配置：
 
-- coding agent 自身需要的环境变量（例如 Codex / Claude Code 所需配置）
-- wrapper 的通知目标配置（例如默认通知 channel / target / account）
+- **敏感 agent 凭据**（例如 `CODEX_API_KEY`）应优先通过 skill 的 `metadata.openclaw.requires.env` + `primaryEnv` 声明后，由 OpenClaw 在运行时注入
+- **wrapper 的非敏感默认通知配置**（例如 `NOTIFY_CHANNEL` / `NOTIFY_TARGET` / `NOTIFY_ACCOUNT_ID`）可以继续放在 `openclaw.json -> skills.entries.coding-assistant.env`
 
-一个通用示意如下：
+推荐示意如下：
 
 ```json
 {
   "skills": {
     "entries": {
       "coding-assistant": {
+        "apiKey": "${CLI_PROXY_API_KEY}",
         "env": {
-          "SOME_AGENT_ENV": "value",
-          "ANOTHER_AGENT_ENV": "value",
           "NOTIFY_CHANNEL": "telegram",
           "NOTIFY_TARGET": "<chat-or-user-id>",
           "NOTIFY_ACCOUNT_ID": "default"
@@ -144,6 +143,19 @@ skills/coding-assistant/
   }
 }
 ```
+
+其中 `apiKey` 只有在 `SKILL.md` 中声明了：
+
+```yaml
+metadata:
+  openclaw:
+    requires:
+      env:
+        - CODEX_API_KEY
+    primaryEnv: CODEX_API_KEY
+```
+
+时，才会被映射到运行时的 `process.env.CODEX_API_KEY`。
 
 启用后可用 `openclaw skills list` 检查 `coding-assistant` 是否来自 `openclaw-extra`。
 
