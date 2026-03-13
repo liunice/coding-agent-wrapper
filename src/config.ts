@@ -17,11 +17,15 @@ interface CodingAssistantNotifyConfig {
 }
 
 interface CodingAssistantSkillConfig {
+  apiKey?: string;
   env?: Record<string, string>;
   notify?: CodingAssistantNotifyConfig;
 }
 
 interface OpenClawConfigShape {
+  env?: {
+    vars?: Record<string, string>;
+  };
   skills?: {
     entries?: Record<string, CodingAssistantSkillConfig | undefined>;
   };
@@ -39,8 +43,16 @@ export function getCodingAssistantSkillConfig(): CodingAssistantSkillConfig {
   const config = loadOpenClawConfig();
   const rawSkillConfig = config?.skills?.entries?.["coding-assistant"] ?? {};
   const configuredEnv = rawSkillConfig.env ?? {};
+  const variableSources = {
+    ...(config?.env?.vars ?? {}),
+    ...process.env,
+  };
+  const resolvedApiKey = normalizeResolvedValue(
+    resolveTemplate(rawSkillConfig.apiKey, variableSources),
+  );
 
   cachedSkillConfig = {
+    apiKey: resolvedApiKey,
     env: configuredEnv,
     notify: {
       channel: process.env.NOTIFY_CHANNEL ?? configuredEnv.NOTIFY_CHANNEL,
@@ -77,5 +89,27 @@ function loadOpenClawConfig(): OpenClawConfigShape | null {
   }
 
   return null;
+}
+
+function resolveTemplate(
+  value: string | undefined,
+  variables: Record<string, string | undefined>,
+): string | undefined {
+  if (!value) {
+    return value;
+  }
+
+  return value.replace(/\$\{([A-Z0-9_]+)\}/g, (_match, name: string) => {
+    return variables[name] ?? "";
+  });
+}
+
+function normalizeResolvedValue(value: string | undefined): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed || undefined;
 }
 
